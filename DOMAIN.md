@@ -29,6 +29,8 @@ The daemon `totpgated` accepts:
 | `--min-block` | `300` | Min rate-limit block duration in seconds |
 | `--max-block` | `86400` | Max rate-limit block duration in seconds |
 | `--rate-limit` | `5/60` | Max failed attempts per window (format `<n>/<window_s>`) |
+| `--user` | `nobody` | Unprivileged user to run as after binding socket |
+| `--group` | `nogroup` | Unprivileged group to run as after binding socket |
 | `--foreground` | off | Log to stderr instead of syslog |
 
 The client `totpgate` accepts:
@@ -208,7 +210,10 @@ ON  successful authentication:
 
 ```
 AFTER  UDP socket is bound (< 1024 requires CAP_NET_BIND_SERVICE):
-    drop all capabilities, setuid/gid to <unprivileged_user>
+    setgroups(gid), setgid(gid), setuid(uid)
+    prctl(PR_SET_NO_NEW_PRIVS, 1)
+    // defaults: user=nobody, group=nogroup; overridable via
+    // --user / --group
 ```
 
 ### BR-7  Ephemeral rule timeout

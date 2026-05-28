@@ -20,7 +20,8 @@ DEPS      = $(OBJS:.o=.d)
 #  Test sources — exclude netlink test (has stubs that conflict)
 #  and daemon test (needs separate binary with mocks + main_core.o)
 TEST_SRCS   = $(filter-out $(TEST_DIR)/mock_%.c $(TEST_DIR)/test_netlink.c \
-                $(TEST_DIR)/test_daemon.c $(TEST_DIR)/test_client.c, $(wildcard $(TEST_DIR)/*.c))
+                $(TEST_DIR)/test_daemon.c $(TEST_DIR)/test_client.c \
+                $(TEST_DIR)/test_privdrop.c, $(wildcard $(TEST_DIR)/*.c))
 TEST_OBJS   = $(patsubst $(TEST_DIR)/%.c, $(OBJ_DIR)/test_%.o, $(TEST_SRCS))
 MOCK_SRCS   = $(wildcard $(TEST_DIR)/mock_*.c)
 MOCK_OBJS   = $(patsubst $(TEST_DIR)/mock_%.c, $(OBJ_DIR)/mock_%.o, $(MOCK_SRCS))
@@ -101,11 +102,21 @@ $(NL_BIN): $(OBJ_DIR)/netlink_test_stubs.o $(OBJ_DIR)/netlink.o | $(BIN_DIR)
 $(OBJ_DIR)/netlink_test_stubs.o: $(TEST_DIR)/test_netlink.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
-test: $(TEST_BIN) $(NL_BIN) $(DAEMON_TEST_BIN) $(CLIENT_TEST_BIN)
+#  Privdrop test — separate binary (defines libc stubs, links against real privdrop.o)
+PRIVDROP_BIN = $(BIN_DIR)/test_privdrop
+
+$(PRIVDROP_BIN): $(OBJ_DIR)/test_privdrop.o $(OBJ_DIR)/privdrop.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+$(OBJ_DIR)/test_privdrop.o: $(TEST_DIR)/test_privdrop.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
+test: $(TEST_BIN) $(NL_BIN) $(DAEMON_TEST_BIN) $(CLIENT_TEST_BIN) $(PRIVDROP_BIN)
 	./$(TEST_BIN)
 	./$(NL_BIN)
 	./$(DAEMON_TEST_BIN)
 	./$(CLIENT_TEST_BIN)
+	./$(PRIVDROP_BIN)
 
 style:
 	indent -linux -l120 -i2 -nut $(SRC_DIR)/*.c $(SRC_DIR)/*.h $(TEST_DIR)/*.c $(TEST_DIR)/*.h 2>/dev/null || true
@@ -156,12 +167,19 @@ $(BIN_DIR)/test_client_cov: $(OBJ_DIR)/cov_test_client.o $(OBJ_DIR)/cov_client_c
                              $(patsubst $(OBJ_DIR)/%.o, $(OBJ_DIR)/cov_%.o, $(LIB_OBJS)) | $(BIN_DIR)
 	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
 
-coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov $(BIN_DIR)/test_daemon_cov $(BIN_DIR)/test_client_cov
+$(BIN_DIR)/test_privdrop_cov: $(OBJ_DIR)/cov_test_privdrop.o $(OBJ_DIR)/cov_privdrop.o | $(BIN_DIR)
+	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
+
+$(OBJ_DIR)/cov_test_privdrop.o: $(TEST_DIR)/test_privdrop.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
+coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov $(BIN_DIR)/test_daemon_cov $(BIN_DIR)/test_client_cov $(BIN_DIR)/test_privdrop_cov
 	@rm -f $(SRC_DIR)/*.gcda $(SRC_DIR)/*.gcno
 	./$(BIN_DIR)/test_runner_cov
 	./$(BIN_DIR)/test_netlink_cov
 	./$(BIN_DIR)/test_daemon_cov
 	./$(BIN_DIR)/test_client_cov
+	./$(BIN_DIR)/test_privdrop_cov
 	@echo "=== Line coverage per module ==="
 	@for src in $(LIB_SRCS); do \
 		base=$$(basename $$src .c); \

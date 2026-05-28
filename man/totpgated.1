@@ -10,7 +10,9 @@ is received it temporarily inserts an nftables rule allowing the sender's
 IP to connect to the protected TCP port. Invalid tokens trigger per-IP
 rate limiting with exponential backoff.
 .P
-After binding the UDP socket the daemon drops privileges.
+After binding the UDP socket the daemon drops privileges to
+an unprivileged user (\fB\-\-user\fR/\fB\-\-group\fR, defaults
+nobody/nogroup).
 .SH OPTIONS
 .TP
 \fB\-\-secret\fR \fIsecret\fR
@@ -34,6 +36,12 @@ Maximum rate-limit block duration. (default: 86400)
 .TP
 \fB\-\-rate-limit\fR \fIn\fB/\fIwindow\fR
 Maximum failed attempts per sliding window. (default: 5/60)
+.TP
+\fB\-\-user\fR \fIuser\fR
+Drop privileges to this user after binding socket. (default: nobody)
+.TP
+\fB\-\-group\fR \fIgroup\fR
+Use this group after dropping privileges. (default: nogroup)
 .TP
 \fB\-\-foreground\fR
 Log to stderr instead of syslog.

@@ -11,6 +11,7 @@
 #include <sys/signalfd.h>
 #include <syslog.h>
 #include "encode.h"
+#include "privdrop.h"
 #include "netlink.h"
 #include "udp.h"
 #include "auth.h"
@@ -29,6 +30,8 @@ struct config {
   unsigned char secret[256];
   size_t secret_len;
   uint32_t timeout;
+  char user[32];
+  char group[32];
   int foreground;
   int test_mode;
   struct rate_limit_cfg rate_limit;
@@ -57,6 +60,8 @@ static void print_usage(const char *prog)
           "  --min-block <seconds>   Min rate-limit block duration (default: 300)\n"
           "  --max-block <seconds>   Max rate-limit block duration (default: 86400)\n"
           "  --rate-limit <n/window> Max fails per window (default: 5/60)\n"
+          "  --user <user>           Drop privileges to this user (default: nobody)\n"
+          "  --group <group>         Use this group after dropping privs (default: nogroup)\n"
           "  --foreground            Log to stderr instead of syslog\n"
           "  --help                  Show this help\n", prog);
 }
@@ -71,6 +76,8 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     {"min-block", required_argument, NULL, 'b'},
     {"max-block", required_argument, NULL, 'B'},
     {"rate-limit", required_argument, NULL, 'r'},
+    {"user", required_argument, NULL, 'u'},
+    {"group", required_argument, NULL, 'g'},
     {"foreground", no_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0}
@@ -78,7 +85,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
   int opt;
   int secret_given = 0;
 
-  while ((opt = getopt_long(argc, argv, "p:t:s:T:b:B:r:fh", long_opts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "p:t:s:T:b:B:r:u:g:fh", long_opts, NULL)) != -1) {
     switch (opt) {
     case 'p':{
         long val = atol(optarg);
@@ -144,6 +151,24 @@ int parse_args(struct config *cfg, int argc, char *argv[])
         }
         cfg->rate_limit.max_fails = (uint32_t) n;
         cfg->rate_limit.window = (uint32_t) w;
+        break;
+      }
+    case 'u':{
+        size_t len = strlen(optarg);
+        if (len >= sizeof(cfg->user)) {
+          fprintf(stderr, "error: --user too long\n");
+          return -1;
+        }
+        memcpy(cfg->user, optarg, len + 1);
+        break;
+      }
+    case 'g':{
+        size_t len = strlen(optarg);
+        if (len >= sizeof(cfg->group)) {
+          fprintf(stderr, "error: --group too long\n");
+          return -1;
+        }
+        memcpy(cfg->group, optarg, len + 1);
         break;
       }
     case 'f':
@@ -381,6 +406,11 @@ int daemon_run(struct config *cfg)
     return 1;
   }
 
+  if (drop_privileges(cfg->user, cfg->group, cfg->foreground) != 0) {
+    daemon_cleanup(&d);
+    return 1;
+  }
+
   while (daemon_process(&d) == 0) {
     if (cfg->test_mode)
       break;
@@ -403,6 +433,8 @@ int main(int argc, char *argv[])
   cfg.rate_limit.max_block = 86400;
   cfg.rate_limit.max_fails = 5;
   cfg.rate_limit.window = 60;
+  memcpy(cfg.user, "nobody", 7);
+  memcpy(cfg.group, "nogroup", 8);
 
   if (parse_args(&cfg, argc, argv) != 0) {
     return 1;

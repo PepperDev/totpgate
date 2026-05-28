@@ -20,6 +20,8 @@ struct config {
   unsigned char secret[256];
   size_t secret_len;
   uint32_t timeout;
+  char user[32];
+  char group[32];
   int foreground;
   int test_mode;
   struct rate_limit_cfg rate_limit;
@@ -40,6 +42,7 @@ int daemon_process(struct daemon *d);
 void daemon_cleanup(struct daemon *d);
 int daemon_run(struct config *cfg);
 int parse_args(struct config *cfg, int argc, char *argv[]);
+int drop_privileges(const char *user, const char *group, int foreground);
 
 /* import mock globals */
 extern int g_nl_init_ret;
@@ -294,6 +297,48 @@ static void test_parse_rate_limit_bad(void)
   optind = 0;
   int ret = parse_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
+}
+
+static void test_parse_user(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--user", "daemon", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_STREQ(cfg.user, "daemon");
+}
+
+static void test_parse_group(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--group", "daemon", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_STREQ(cfg.group, "daemon");
+}
+
+static void test_drop_privs_noop(void)
+{
+  /* not root — drop_privileges should be a no-op */
+  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 1), 0);
 }
 
 /* ---- daemon_setup tests ---- */
@@ -849,7 +894,8 @@ TEST(test_parse_minimal),
       TEST(test_parse_max_block), TEST(test_parse_rate_limit),
       TEST(test_parse_rate_limit_bad),
       TEST(test_daemon_rate_limit_block),
-      TEST(test_daemon_rate_limit_success_clears), TEST(test_prune_expired), TEST(test_prune_fresh_kept), END_TEST};
+      TEST(test_daemon_rate_limit_success_clears), TEST(test_prune_expired), TEST(test_prune_fresh_kept),
+      TEST(test_parse_user), TEST(test_parse_group), TEST(test_drop_privs_noop), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)
