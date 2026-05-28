@@ -28,6 +28,12 @@
       in a loop that retries on `EINTR`.
 - [ ] **Base32 decode**: reject invalid characters (including `=` padding
       errors); output buffer length check.
+- [ ] **Base64 decode**: reject invalid characters (RFC 4648 standard alphabet
+      only); reject malformed padding; output buffer length check.
+- [ ] **Hex decode**: reject non-hex characters; handle odd-length input
+      safely (no out-of-bounds read).
+- [ ] **Secret prefix**: recognise exactly `hex:` and `b64:` prefixes (no
+      partial or case-insensitive prefix matching).
 
 ---
 

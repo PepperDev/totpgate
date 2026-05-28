@@ -27,7 +27,7 @@ totpgate codebase.  **Read this first** before making any changes.
 - **Style**: `indent -linux -120 -i2 -nut` — run `make style` to auto-format.
 - **Braces**: always wrap blocks with braces, even single-line `if`/`for`/`while`/`do`.
 - **No third-party libraries**: implement everything from scratch (SHA1, HMAC,
-  netlink helpers, test framework, …).
+  base32, base64, hex decode, netlink helpers, test framework, …).
 - **No external binaries**: manipulate firewall rules via netlink sockets
   directly — never shell out to `iptables`, `nft`, or `ip`.
 

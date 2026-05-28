@@ -24,14 +24,14 @@ The daemon `totpgated` accepts:
 |---|---|---|
 | `--control-port` | `2222` | UDP port the daemon listens for TOTP packets |
 | `--port` | `22` | Target TCP port to protect |
-| `--secret` | *(required)* | Base32-encoded shared secret |
+| `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--foreground` | off | Log to stderr instead of syslog |
 
 The client `totpgate` accepts:
 
 | Argument | Default | Description |
 |---|---|---|
-| `--secret` | *(required)* | Base32-encoded shared secret |
+| `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--control-port` | `2222` | UDP port of the target daemon |
 | `<server>` | *(required)* | IP or hostname of the daemon |
 | `<target_port>` | — | Override default target port (optional) |
@@ -43,9 +43,30 @@ The client `totpgate` accepts:
 ### 2.1  `shared_secret`
 
 - Opaque byte array (≥ 16 bytes, recommended 32).
-- Base32-encoded in configuration (RFC 4648).
 - Known to both client and daemon _a priori_.
 - **Never** transmitted over the wire.
+
+#### Encoding prefix dispatch
+
+The `--secret` argument is a string with an optional prefix that selects the
+decoding scheme:
+
+| Prefix | Encoding | Example |
+|---|---|---|
+| *(none)* | Base32 (RFC 4648) | `JBSWY3DPEHPK3PXP` |
+| `hex:` | Hexadecimal, case-insensitive | `hex:48656c6c6f` |
+| `b64:` | Base64 (RFC 4648, standard alphabet with `=`) | `b64:SGVsbG8=` |
+
+Internally all three are decoded into the same raw byte array before any
+cryptographic operation.  The prefix is stripped during parsing and is not
+part of the encoded payload.
+
+Decoding rules:
+- Base32: reject characters outside RFC 4648 alphabet, reject invalid padding.
+- Hex: reject non-hex characters (`0-9`, `a-f`, `A-F` only); accept both
+  cases; accept odd-length input (implicit leading zero).
+- Base64: reject characters outside RFC 4648 standard alphabet; reject invalid
+  padding; handle embedded whitespace.
 
 ### 2.2  `totp_token`
 
@@ -198,6 +219,7 @@ automatically removes them after expiry.
 START
   │
   ├─ 1. Parse CLI arguments (--control-port, --port, --secret)
+  │      └─ decode secret: detect prefix → base32 / hex / b64 decode → raw bytes
   ├─ 2. Validate & prepare nftables table
   │      ├─ create table "totpgate" if missing
   │      ├─ create chain "input" if missing

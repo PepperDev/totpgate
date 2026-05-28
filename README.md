@@ -68,8 +68,8 @@ warnings** before the section is considered complete.
 ## Usage
 
 ```sh
-totpgated --control-port 2222 --port 22 --secret <base32_secret>
-totpgate  --secret <base32_secret> --control-port 2222 <server> [target_port]
+totpgated --control-port 2222 --port 22 --secret "JBSWY3DPEHPK3PXP"
+totpgate  --secret "hex:48656c6c6f" --control-port 2222 server.example.com
 ```
 
 The daemon listens on UDP `--control-port` for a valid TOTP.  On match the

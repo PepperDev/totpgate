@@ -12,11 +12,22 @@
 - [ ] Verify `musl-gcc` and `indent` are available; document missing tool policy
 - [ ] Create `src/main.c` with CLI option parsing using `getopt_long`:
       `--control-port` (default 2222), `--port` (default 22), `--secret`, `--foreground`
-- [ ] Create empty `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`, `config.h`, `auth.h`, `util.h`
+- [ ] Create empty headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
+      `encode.h`, `auth.h`, `util.h`
 - [ ] Create `test/test_runner.h` with minimal test macros (ASSERT_INT_EQ, ASSERT_STREQ, etc.)
 - [ ] Create `test/test_runner.c` that runs all registered tests
 - [ ] `make test` passes (no tests yet, but framework compiles)
 - [ ] `make style` runs without error
+
+## Encoding Utilities
+
+- [ ] Implement `encode.c` — base32 decode (RFC 4648)
+- [ ] Implement `encode.c` — hex decode (accept both cases, odd-length)
+- [ ] Implement `encode.c` — base64 decode (RFC 4648 standard alphabet)
+- [ ] `secret_decode(input, &out, &out_len, &err)` — detect prefix, dispatch
+      to correct decoder, return raw bytes
+- [ ] Unit tests: known decode vectors, invalid chars, padding errors, empty input
+- [ ] ≥ 80 % line coverage on `encode.c`
 
 ## SHA-1 Implementation
 
@@ -39,15 +50,6 @@
 - [ ] Support 6–8 digit tokens
 - [ ] Unit tests: RFC 6238 test vectors (SHA-1 variant)
 - [ ] ≥ 80 % line coverage on `totp.c`
-
-## Configuration Module
-
-- [ ] Implement `config.c` — parse `KEY=VALUE` file, skip `#` comments and blank lines
-- [ ] Validate `SECRET` is non-empty and valid base32
-- [ ] Validate `LISTEN_PORT` and `TARGET_PORT` are 1–65535
-- [ ] Validate numeric fields are non-negative integers
-- [ ] Unit tests: valid config, missing key, invalid port, base32 decode edge cases
-- [ ] ≥ 80 % line coverage on `config.c`
 
 ## Netlink Firewall Module
 
