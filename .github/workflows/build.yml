@@ -32,9 +32,24 @@ jobs:
           {
             echo '## Code Coverage'
             echo ''
-            echo '```'
-            sed -n '/=== Line coverage per module ===/,$p' coverage_output.txt
-            echo '```'
+            echo '| Module | Lines | Coverage |'
+            echo '|--------|------:|---------:|'
+            awk -v sq="'" '
+              /^File / {
+                n = split($0, a, sq)
+                module = a[2]
+                sub(/^src\//, "", module)
+                sub(/\.c$/, "", module)
+              }
+              /^Lines executed:/ {
+                if (seen[module]++) next
+                split($0, a, ":")
+                rest = a[2]
+                split(rest, b, "%")
+                split(b[2], c, "of")
+                printf("| %s | %d | %s%% |\n", module, c[2] + 0, b[1])
+              }
+            ' coverage_output.txt
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
