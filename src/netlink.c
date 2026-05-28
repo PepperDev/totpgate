@@ -10,6 +10,10 @@
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nf_tables.h>
 
+#ifndef NFT_BITWISE_MASK_XOR
+#define NFT_BITWISE_MASK_XOR 0
+#endif
+
 #define TABLE_NAME  "totpgate"
 #define CHAIN_NAME  "input"
 #define BUF_SIZE    4096
