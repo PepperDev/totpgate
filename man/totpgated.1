@@ -1,0 +1,85 @@
+.TH TOTPGATED 1 2026-05-28 "totpgate" "User Commands"
+.SH NAME
+totpgated \- Single Packet Authorization daemon
+.SH SYNOPSIS
+.B totpgated
+\fB\-\-secret\fR \fIsecret\fR [\fIoptions\fR]
+.SH DESCRIPTION
+\fBtotpgated\fR listens on a UDP port for TOTP tokens. When a valid token
+is received it temporarily inserts an nftables rule allowing the sender's
+IP to connect to the protected TCP port. Invalid tokens trigger per-IP
+rate limiting with exponential backoff.
+.P
+After binding the UDP socket the daemon drops privileges.
+.SH OPTIONS
+.TP
+\fB\-\-secret\fR \fIsecret\fR
+Shared secret. Base32 by default; prefix with \fBhex:\fR or \fBb64:\fR
+for other encodings. (required)
+.TP
+\fB\-\-port\fR \fIport\fR
+UDP listen port. (default: 2222)
+.TP
+\fB\-\-target-port\fR \fIport\fR
+TCP application port to protect. (default: 22)
+.TP
+\fB\-\-timeout\fR \fIseconds\fR
+Ephemeral rule lifetime. (default: 30, max: 86400)
+.TP
+\fB\-\-min-block\fR \fIseconds\fR
+Minimum rate-limit block duration. (default: 300)
+.TP
+\fB\-\-max-block\fR \fIseconds\fR
+Maximum rate-limit block duration. (default: 86400)
+.TP
+\fB\-\-rate-limit\fR \fIn\fB/\fIwindow\fR
+Maximum failed attempts per sliding window. (default: 5/60)
+.TP
+\fB\-\-foreground\fR
+Log to stderr instead of syslog.
+.TP
+\fB\-\-help\fR
+Display usage and exit.
+.SH AUTH PACKET FORMAT
+The client sends a UDP datagram containing:
+.P
+.RS
+.I token\fR[\fB:\fR\fIport\fR[\fB:\fR\fIlifetime\fR]]
+.RE
+.P
+.TP
+\fItoken\fR
+6\-8 decimal digits (TOTP).
+.TP
+\fIport\fR
+Optional target TCP port override (0 = use config default).
+.TP
+\fIlifetime\fR
+Optional rule lifetime override in seconds (0 = use config default).
+.P
+Trailing data after the third field is ignored.
+.SH RATE LIMITING
+Per-IP failure tracking with exponential backoff. After the configured
+number of failures within the sliding window the IP is blocked for
+\fB\-\-min-block\fR seconds. Each subsequent block cycle doubles the
+duration, capped at \fB\-\-max-block\fR. A successful auth clears the
+failure count.
+.SH FIREWALL
+The daemon manages an nftables table named \fBtotpgate\fR:
+.TP
+Permanent rules
+ct state established,related accept; non-target TCP ports accept;
+target TCP port drop.
+.TP
+Ephemeral rules
+ip saddr <client> tcp dport <target> ct state new accept (auto-expires
+after \fB\-\-timeout\fR seconds).
+.SH SIGNALS
+.TP
+SIGTERM, SIGINT
+Cleanly remove firewall rules and exit.
+.SH EXIT STATUS
+.P
+\fBtotpgated\fR exits 0 on clean shutdown, 1 on error.
+.SH SEE ALSO
+.BR totpgate (1)

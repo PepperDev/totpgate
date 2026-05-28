@@ -26,6 +26,9 @@ The daemon `totpgated` accepts:
 | `--target-port` | `22` | TCP application port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--timeout` | `30` | Ephemeral rule lifetime in seconds |
+| `--min-block` | `300` | Min rate-limit block duration in seconds |
+| `--max-block` | `86400` | Max rate-limit block duration in seconds |
+| `--rate-limit` | `5/60` | Max failed attempts per window (format `<n>/<window_s>`) |
 | `--foreground` | off | Log to stderr instead of syslog |
 
 The client `totpgate` accepts:

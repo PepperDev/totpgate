@@ -14,6 +14,7 @@
 #include "netlink.h"
 #include "udp.h"
 #include "auth.h"
+#include "ratelimit.h"
 
 #define TOTP_DIGITS 6
 #define TOTP_STEP 30
@@ -30,6 +31,7 @@ struct config {
   uint32_t timeout;
   int foreground;
   int test_mode;
+  struct rate_limit_cfg rate_limit;
 };
 
 struct daemon {
@@ -52,6 +54,9 @@ static void print_usage(const char *prog)
           "                          (base32 by default; prefix with\n"
           "                           hex: or b64: for other encodings)\n"
           "  --timeout <seconds>     Rule lifetime (default: 30)\n"
+          "  --min-block <seconds>   Min rate-limit block duration (default: 300)\n"
+          "  --max-block <seconds>   Max rate-limit block duration (default: 86400)\n"
+          "  --rate-limit <n/window> Max fails per window (default: 5/60)\n"
           "  --foreground            Log to stderr instead of syslog\n"
           "  --help                  Show this help\n", prog);
 }
@@ -63,6 +68,9 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     {"target-port", required_argument, NULL, 't'},
     {"secret", required_argument, NULL, 's'},
     {"timeout", required_argument, NULL, 'T'},
+    {"min-block", required_argument, NULL, 'b'},
+    {"max-block", required_argument, NULL, 'B'},
+    {"rate-limit", required_argument, NULL, 'r'},
     {"foreground", no_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0}
@@ -70,7 +78,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
   int opt;
   int secret_given = 0;
 
-  while ((opt = getopt_long(argc, argv, "p:t:s:T:fh", long_opts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "p:t:s:T:b:B:r:fh", long_opts, NULL)) != -1) {
     switch (opt) {
     case 'p':{
         long val = atol(optarg);
@@ -108,6 +116,34 @@ int parse_args(struct config *cfg, int argc, char *argv[])
           return -1;
         }
         cfg->timeout = (uint32_t) val;
+        break;
+      }
+    case 'b':{
+        long val = atol(optarg);
+        if (val < 1 || val > 86400) {
+          fprintf(stderr, "error: --min-block must be 1-86400\n");
+          return -1;
+        }
+        cfg->rate_limit.min_block = (uint32_t) val;
+        break;
+      }
+    case 'B':{
+        long val = atol(optarg);
+        if (val < 1 || val > 86400) {
+          fprintf(stderr, "error: --max-block must be 1-86400\n");
+          return -1;
+        }
+        cfg->rate_limit.max_block = (uint32_t) val;
+        break;
+      }
+    case 'r':{
+        int n = 0, w = 0;
+        if (sscanf(optarg, "%d/%d", &n, &w) != 2 || n < 1 || w < 1) {
+          fprintf(stderr, "error: --rate-limit must be <fails>/<window>\n");
+          return -1;
+        }
+        cfg->rate_limit.max_fails = (uint32_t) n;
+        cfg->rate_limit.window = (uint32_t) w;
         break;
       }
     case 'f':
@@ -276,16 +312,25 @@ int daemon_process(struct daemon *d)
         token_port = 0;
         lifetime = 0;
 
+        if (rate_limit_check(src_ip, now) != 0) {
+          log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
+          continue;
+        }
+
         if (auth_parse(buf, (size_t)ret, &token, &token_port, &lifetime) != 0) {
           log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
+          rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
           continue;
         }
 
         if (auth_validate(d->cfg->secret, d->cfg->secret_len,
                           token, src_ip, now, TOTP_DIGITS, TOTP_STEP, DRIFT_BEHIND, DRIFT_AHEAD) != 0) {
           log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
+          rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
           continue;
         }
+
+        rate_limit_success(src_ip);
 
         target_port = token_port ? token_port : d->cfg->target_port;
 
@@ -354,6 +399,10 @@ int main(int argc, char *argv[])
   cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
 
   if (parse_args(&cfg, argc, argv) != 0) {
     return 1;

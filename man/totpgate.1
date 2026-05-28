@@ -1,0 +1,34 @@
+.TH TOTPGATE 1 2026-05-28 "totpgate" "User Commands"
+.SH NAME
+totpgate \- send a TOTP authorization packet
+.SH SYNOPSIS
+.B totpgate
+\fB\-\-secret\fR \fIsecret\fR [\fIoptions\fR] \fIserver\fR [\fItarget_port\fR]
+.SH DESCRIPTION
+\fBtotpgate\fR generates a TOTP token from the shared secret and sends it
+as a UDP datagram to the daemon running on \fIserver\fR. Optionally
+overrides the target TCP port in the authorization request.
+.SH OPTIONS
+.TP
+\fB\-\-secret\fR \fIsecret\fR
+Shared secret. Base32 by default; prefix with \fBhex:\fR or \fBb64:\fR
+for other encodings. (required)
+.TP
+\fB\-\-port\fR \fIport\fR
+UDP port of the target daemon. (default: 2222)
+.TP
+\fB\-\-help\fR
+Display usage and exit.
+.SH ARGUMENTS
+.TP
+\fIserver\fR
+IP address or hostname of the \fBtotpgated\fR daemon. (required)
+.TP
+\fItarget_port\fR
+Optional TCP port override sent in the auth packet. If omitted the
+daemon uses its configured \fB\-\-target-port\fR.
+.SH EXIT STATUS
+.P
+\fBtotpgate\fR exits 0 on success, 1 on error.
+.SH SEE ALSO
+.BR totpgated (1)

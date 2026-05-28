@@ -7,6 +7,7 @@ extern const test_case_t hmac_tests[];
 extern const test_case_t totp_tests[];
 extern const test_case_t udp_tests[];
 extern const test_case_t auth_tests[];
+extern const test_case_t ratelimit_tests[];
 
 static const test_group_t all_groups[] = {
   {"encode", encode_tests},
@@ -15,6 +16,7 @@ static const test_group_t all_groups[] = {
   {"totp", totp_tests},
   {"udp", udp_tests},
   {"auth", auth_tests},
+  {"ratelimit", ratelimit_tests},
 };
 
 int main(void)

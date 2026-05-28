@@ -4,6 +4,7 @@
 #include "udp.h"
 #include "auth.h"
 #include "totp.h"
+#include "ratelimit.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -21,6 +22,7 @@ struct config {
   uint32_t timeout;
   int foreground;
   int test_mode;
+  struct rate_limit_cfg rate_limit;
 };
 
 struct daemon {
@@ -54,6 +56,8 @@ extern unsigned char g_udp_recv_buf[256];
 extern size_t g_udp_recv_len;
 extern uint32_t g_udp_recv_src_ip;
 extern uint16_t g_udp_recv_src_port;
+
+extern int g_udp_recv_done;
 
 extern void mock_netlink_reset(void);
 extern void mock_udp_reset(void);
@@ -198,6 +202,97 @@ static void test_parse_unknown_option(void)
 
   optind = 0;
   int ret = parse_args(&cfg, 4, argv);
+  ASSERT_INT_EQ(ret, -1);
+}
+
+/* ---- daemon_setup tests ---- */
+
+static void test_parse_min_block(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--min-block", "600", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.rate_limit.min_block, 600);
+}
+
+static void test_parse_min_block_bad(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--min-block", "99999", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, -1);
+}
+
+static void test_parse_max_block(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--max-block", "7200", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.rate_limit.max_block, 7200);
+}
+
+static void test_parse_rate_limit(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--rate-limit", "10/120", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.rate_limit.max_fails, 10);
+  ASSERT_INT_EQ((int)cfg.rate_limit.window, 120);
+}
+
+static void test_parse_rate_limit_bad(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--rate-limit", "abc", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -354,12 +449,18 @@ static void test_daemon_run_test_mode(void)
   mock_netlink_reset();
   mock_udp_reset();
 
+  rate_limit_reset();
+
   memset(&cfg, 0, sizeof(cfg));
   cfg.port = 2222;
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
   cfg.test_mode = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
 
   int ret = daemon_run(&cfg);
   ASSERT_INT_EQ(ret, 0);
@@ -398,6 +499,7 @@ static void test_daemon_process_packet(void)
   int s;
   struct sockaddr_in addr;
 
+  rate_limit_reset();
   mock_netlink_reset();
   mock_udp_reset();
 
@@ -410,6 +512,10 @@ static void test_daemon_process_packet(void)
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
   memcpy(cfg.secret, test_secret, 20);
 
   /* open daemon (binds real UDP socket to port 2222) */
@@ -453,6 +559,7 @@ static void test_daemon_malformed_packet(void)
   int s;
   struct sockaddr_in addr;
 
+  rate_limit_reset();
   mock_netlink_reset();
   mock_udp_reset();
 
@@ -465,6 +572,10 @@ static void test_daemon_malformed_packet(void)
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
   memcpy(cfg.secret, test_secret, 20);
 
   ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
@@ -501,6 +612,7 @@ static void test_daemon_truncated_packet(void)
   int s;
   struct sockaddr_in addr;
 
+  rate_limit_reset();
   mock_netlink_reset();
   mock_udp_reset();
 
@@ -513,6 +625,10 @@ static void test_daemon_truncated_packet(void)
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
   memcpy(cfg.secret, test_secret, 20);
 
   ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
@@ -536,6 +652,148 @@ static void test_daemon_truncated_packet(void)
 
   /* verify netlink_insert was NOT called */
   ASSERT_INT_EQ((int)g_nl_insert_ip, 0);
+
+  daemon_cleanup(&d);
+}
+
+static void do_fail_auth(struct daemon *d, uint32_t src_ip, uint16_t daemon_port)
+{
+  int s;
+
+  (void)src_ip;
+  g_udp_recv_len = 6;
+  memcpy(g_udp_recv_buf, "000000", 6);
+  g_udp_recv_src_ip = src_ip;
+  g_udp_recv_src_port = 9999;
+  g_udp_recv_done = 0;
+
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  sendto(s, "x", 1, 0, (const struct sockaddr *)&(struct sockaddr_in) {
+         .sin_family = AF_INET,
+         .sin_port = htons(daemon_port),
+         .sin_addr.s_addr = htonl(0x7f000001)
+         },
+         sizeof(struct sockaddr_in));
+  close(s);
+  ASSERT_INT_EQ(daemon_process(d), 0);
+}
+
+static void test_daemon_rate_limit_block(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  int i;
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2225;
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* 5 failed auths from the same IP */
+  for (i = 0; i < 5; i++) {
+    do_fail_auth(&d, 0x0a0a0a0a, 2225);
+  }
+
+  /* after 5 failures, the 6th should be rate limited (blocked) */
+  /* the g_udp_recv data doesn't matter — rate_limit_check should reject it */
+  g_udp_recv_done = 0;
+  {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    sendto(s, "x", 1, 0, (const struct sockaddr *)&(struct sockaddr_in) {
+           .sin_family = AF_INET,
+           .sin_port = htons(2225),
+           .sin_addr.s_addr = htonl(0x7f000001)
+           },
+           sizeof(struct sockaddr_in));
+    close(s);
+  }
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* rate limit should have blocked — netlink_insert NOT called */
+  ASSERT_INT_EQ((int)g_nl_insert_ip, 0);
+
+  daemon_cleanup(&d);
+}
+
+static void test_daemon_rate_limit_success_clears(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  int i;
+  uint32_t token;
+  uint64_t counter;
+  char pkt[32];
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2226;
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* 4 failed auths from the same IP */
+  for (i = 0; i < 4; i++) {
+    do_fail_auth(&d, 0x0b0b0b0b, 2226);
+  }
+
+  /* 5th attempt: send a valid TOTP — should succeed and clear rate limit */
+  counter = (uint64_t) (time(NULL) / 30);
+  token = totp_generate(test_secret, 20, counter, 6);
+  pkt[0] = '\0';
+  snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
+
+  g_udp_recv_len = strlen(pkt);
+  memcpy(g_udp_recv_buf, pkt, g_udp_recv_len);
+  g_udp_recv_src_ip = 0x0b0b0b0b;
+  g_udp_recv_src_port = 9999;
+  g_udp_recv_done = 0;
+
+  {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    sendto(s, "x", 1, 0, (const struct sockaddr *)&(struct sockaddr_in) {
+           .sin_family = AF_INET,
+           .sin_port = htons(2226),
+           .sin_addr.s_addr = htonl(0x7f000001)
+           },
+           sizeof(struct sockaddr_in));
+    close(s);
+  }
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* rate limit should be cleared — netlink_insert WAS called */
+  ASSERT_INT_EQ((int)g_nl_insert_ip, 0x0b0b0b0b);
 
   daemon_cleanup(&d);
 }
@@ -586,7 +844,12 @@ TEST(test_parse_minimal),
       TEST(test_daemon_run_test_mode),
       TEST(test_daemon_run_setup_fail),
       TEST(test_daemon_process_packet), TEST(test_daemon_malformed_packet),
-      TEST(test_daemon_truncated_packet), TEST(test_prune_expired), TEST(test_prune_fresh_kept), END_TEST};
+      TEST(test_daemon_truncated_packet),
+      TEST(test_parse_min_block), TEST(test_parse_min_block_bad),
+      TEST(test_parse_max_block), TEST(test_parse_rate_limit),
+      TEST(test_parse_rate_limit_bad),
+      TEST(test_daemon_rate_limit_block),
+      TEST(test_daemon_rate_limit_success_clears), TEST(test_prune_expired), TEST(test_prune_fresh_kept), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)
