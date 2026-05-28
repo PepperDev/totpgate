@@ -20,3 +20,8 @@
 - [x] Seccomp filter: allowlist of glibc-compatible syscalls via BPF
 - [ ] Configuration file permissions check: warn if world-readable
 - [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
+
+## CI / CD
+
+- [ ] GitHub Actions workflow to build and produce artifacts for:
+      `i686`/`x86`, `x86_64`/`amd64`, `armhf`, `armv7`, `aarch64`

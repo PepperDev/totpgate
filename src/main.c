@@ -10,6 +10,8 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <syslog.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "encode.h"
 #include "privdrop.h"
 #include "seccomp.h"
@@ -24,6 +26,7 @@
 #define DRIFT_AHEAD 1
 #define EPOLL_MAXEVENTS 64
 #define PRUNE_INTERVAL 5
+#define SECRET_FILE_MAX 4096
 
 struct config {
   uint16_t port;
@@ -33,6 +36,7 @@ struct config {
   uint32_t timeout;
   char user[32];
   char group[32];
+  char secret_file[SECRET_FILE_MAX];
   int foreground;
   int test_mode;
   struct rate_limit_cfg rate_limit;
@@ -54,9 +58,10 @@ static void print_usage(const char *prog)
           "Options:\n"
           "  --port <port>           UDP listen port (default: 2222)\n"
           "  --target-port <port>    TCP application port to protect (default: 22)\n"
-          "  --secret <secret>       Shared secret\n"
+          "  --secret <secret>       Shared secret (mutually exclusive with --secret-file)\n"
           "                          (base32 by default; prefix with\n"
           "                           hex: or b64: for other encodings)\n"
+          "  --secret-file <path>    Read secret from file (mutually exclusive with --secret)\n"
           "  --timeout <seconds>     Rule lifetime (default: 30)\n"
           "  --min-block <seconds>   Min rate-limit block duration (default: 300)\n"
           "  --max-block <seconds>   Max rate-limit block duration (default: 86400)\n"
@@ -73,6 +78,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     {"port", required_argument, NULL, 'p'},
     {"target-port", required_argument, NULL, 't'},
     {"secret", required_argument, NULL, 's'},
+    {"secret-file", required_argument, NULL, 'S'},
     {"timeout", required_argument, NULL, 'T'},
     {"min-block", required_argument, NULL, 'b'},
     {"max-block", required_argument, NULL, 'B'},
@@ -86,7 +92,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
   int opt;
   int secret_given = 0;
 
-  while ((opt = getopt_long(argc, argv, "p:t:s:T:b:B:r:u:g:fh", long_opts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "p:t:s:S:T:b:B:r:u:g:fh", long_opts, NULL)) != -1) {
     switch (opt) {
     case 'p':{
         long val = atol(optarg);
@@ -107,6 +113,10 @@ int parse_args(struct config *cfg, int argc, char *argv[])
         break;
       }
     case 's':{
+        if (cfg->secret_file[0] != '\0') {
+          fprintf(stderr, "error: --secret and --secret-file are mutually exclusive\n");
+          return -1;
+        }
         size_t out_len = sizeof(cfg->secret);
         enum secret_encoding enc;
         if (secret_decode(optarg, cfg->secret, &out_len, &enc) != 0) {
@@ -115,6 +125,19 @@ int parse_args(struct config *cfg, int argc, char *argv[])
         }
         cfg->secret_len = out_len;
         secret_given = 1;
+        break;
+      }
+    case 'S':{
+        size_t len = strlen(optarg);
+        if (len >= sizeof(cfg->secret_file)) {
+          fprintf(stderr, "error: --secret-file path too long\n");
+          return -1;
+        }
+        if (secret_given) {
+          fprintf(stderr, "error: --secret-file and --secret are mutually exclusive\n");
+          return -1;
+        }
+        memcpy(cfg->secret_file, optarg, len + 1);
         break;
       }
     case 'T':{
@@ -184,8 +207,8 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     }
   }
 
-  if (!secret_given) {
-    fprintf(stderr, "error: --secret is required\n");
+  if (!secret_given && cfg->secret_file[0] == '\0') {
+    fprintf(stderr, "error: --secret or --secret-file is required\n");
     print_usage(argv[0]);
     return -1;
   }
@@ -200,6 +223,57 @@ static void log_msg(struct config *cfg, int priority, const char *msg)
   } else {
     syslog(priority, "%s", msg);
   }
+}
+
+int read_secret_file(const char *path, struct config *cfg)
+{
+  struct stat st;
+  int fd;
+  ssize_t n;
+  char buf[4096];
+  size_t len;
+
+  if (stat(path, &st) != 0) {
+    fprintf(stderr, "error: cannot stat %s: %s\n", path, strerror(errno));
+    return -1;
+  }
+
+  if (st.st_mode & (S_IROTH | S_IWOTH | S_IXOTH)) {
+    fprintf(stderr, "warning: %s is world-readable\n", path);
+  }
+
+  fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    fprintf(stderr, "error: cannot open %s: %s\n", path, strerror(errno));
+    return -1;
+  }
+
+  n = read(fd, buf, sizeof(buf) - 1);
+  if (n < 0) {
+    fprintf(stderr, "error: cannot read %s: %s\n", path, strerror(errno));
+    close(fd);
+    return -1;
+  }
+  close(fd);
+
+  buf[n] = '\0';
+
+  len = (size_t)n;
+  while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' || buf[len - 1] == ' '))
+    len--;
+  buf[len] = '\0';
+
+  {
+    size_t out_len = sizeof(cfg->secret);
+    enum secret_encoding enc;
+    if (secret_decode(buf, cfg->secret, &out_len, &enc) != 0) {
+      fprintf(stderr, "error: invalid secret encoding in %s\n", path);
+      return -1;
+    }
+    cfg->secret_len = out_len;
+  }
+
+  return 0;
 }
 
 void daemon_cleanup(struct daemon *d);
@@ -441,6 +515,12 @@ int main(int argc, char *argv[])
 
   if (parse_args(&cfg, argc, argv) != 0) {
     return 1;
+  }
+
+  if (cfg.secret_file[0] != '\0') {
+    if (read_secret_file(cfg.secret_file, &cfg) != 0) {
+      return 1;
+    }
   }
 
   return daemon_run(&cfg);

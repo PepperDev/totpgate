@@ -22,6 +22,7 @@ struct config {
   uint32_t timeout;
   char user[32];
   char group[32];
+  char secret_file[4096];
   int foreground;
   int test_mode;
   struct rate_limit_cfg rate_limit;
@@ -43,6 +44,7 @@ void daemon_cleanup(struct daemon *d);
 int daemon_run(struct config *cfg);
 int parse_args(struct config *cfg, int argc, char *argv[]);
 int drop_privileges(const char *user, const char *group, int foreground);
+int read_secret_file(const char *path, struct config *cfg);
 
 /* import mock globals */
 extern int g_nl_init_ret;
@@ -333,6 +335,81 @@ static void test_parse_group(void)
   int ret = parse_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_STREQ(cfg.group, "daemon");
+}
+
+static void test_parse_secret_file(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret-file", "/etc/totpgated.key", NULL };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 3, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_STREQ(cfg.secret_file, "/etc/totpgated.key");
+}
+
+static void test_parse_secret_file_too_long(void)
+{
+  struct config cfg;
+  char longpath[4100];
+  char *argv[3];
+
+  memset(longpath, 'a', 4096);
+  longpath[4096] = '\0';
+  argv[0] = "totpgated";
+  argv[1] = "--secret-file";
+  argv[2] = longpath;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 3, argv), -1);
+}
+
+static void test_parse_secret_mutual_exclusive(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--secret-file", "/tmp/secret", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+}
+
+static void test_read_secret_file_ok(void)
+{
+  struct config cfg;
+  const char *path = "/tmp/totpgate_test_secret";
+  FILE *f;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2222;
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  f = fopen(path, "w");
+  ASSERT_TRUE(f != NULL);
+  fprintf(f, "JBSWY3DPEHPK3PXP\n");
+  fclose(f);
+
+  ASSERT_INT_EQ(read_secret_file(path, &cfg), 0);
+  ASSERT_TRUE(cfg.secret_len > 0);
+
+  unlink(path);
 }
 
 static void test_drop_privs_noop(void)
@@ -895,7 +972,9 @@ TEST(test_parse_minimal),
       TEST(test_parse_rate_limit_bad),
       TEST(test_daemon_rate_limit_block),
       TEST(test_daemon_rate_limit_success_clears), TEST(test_prune_expired), TEST(test_prune_fresh_kept),
-      TEST(test_parse_user), TEST(test_parse_group), TEST(test_drop_privs_noop), END_TEST};
+      TEST(test_parse_user), TEST(test_parse_group),
+      TEST(test_parse_secret_file), TEST(test_parse_secret_file_too_long),
+      TEST(test_parse_secret_mutual_exclusive), TEST(test_read_secret_file_ok), TEST(test_drop_privs_noop), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)
