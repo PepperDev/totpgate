@@ -102,7 +102,32 @@ Run: `make coverage`
 
 ---
 
-## 5.  Task lifecycle (TODO.md)
+## 5.  Performance-first design
+
+When multiple technical solutions are possible, always prefer the one that
+performs better under heavy workload.  Key principles:
+
+- **I/O multiplexing**: use `epoll` (edge-triggered) exclusively — never
+  `poll`, `select`, or `ppoll`.
+- **Non-blocking**: every socket fd must be `O_NONBLOCK`.  Never use blocking
+  I/O in the daemon's main loop.
+- **Batch processing**: `epoll_wait` with `maxevents >= 64` and process all
+  ready fds per call.
+- **Stack over heap**: prefer stack allocation; when heap is required, allocate
+  at init time, not per-request.
+- **Lock-free**: no mutexes in the hot path; use per-CPU data or
+  single-threaded event loop with lock-free ring buffers if cross-thread
+  communication is needed.
+- **Readiness vs completion**: use level-triggered `epoll` for listen sockets
+  (accept until EAGAIN) and edge-triggered for data sockets (loop read/write
+  until EAGAIN).
+- **Memory**: fixed-size pools aren't just for embedded — they prevent
+  allocation jitter under load.  Prefer a pre-allocated session pool with an
+  SLAB-style free list.
+
+---
+
+## 7.  Task lifecycle (TODO.md)
 
 - Each **section** groups related tasks.
 - A task is **done** when:
@@ -113,10 +138,12 @@ Run: `make coverage`
   - `BUG_PREVENTION.md` has been reviewed for applicable items.
 - When **all** tasks in a section are done, **delete the entire section** from
   `TODO.md`.
+- **Before every commit**: review `TODO.md` and ensure completed sections
+  have been removed and remaining items are accurate.
 
 ---
 
-## 6.  Bug prevention
+## 8.  Bug prevention
 
 Whenever a bug is fixed, evaluate its **recurrence likelihood**:
 
@@ -132,7 +159,7 @@ new task.
 
 ---
 
-## 7.  Privilege model
+## 9.  Privilege model
 
 - Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
 - If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `gcov`),

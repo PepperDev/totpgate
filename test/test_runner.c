@@ -2,9 +2,11 @@
 
 /* test groups */
 extern const test_case_t encode_tests[];
+extern const test_case_t sha1_tests[];
 
 static const test_group_t all_groups[] = {
     { "encode", encode_tests },
+    { "sha1", sha1_tests },
 };
 
 int main(void)

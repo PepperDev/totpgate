@@ -5,31 +5,6 @@
 
 ---
 
-## Project Foundation
-
-- [x] Create Makefile with static musl build, test, style, coverage targets
-- [x] Create directory layout: `src/`, `test/`, `bin/`, `obj/`
-- [x] Create `src/main.c` with CLI option parsing using `getopt_long`:
-      `--port` (default 2222), `--target-port` (default 22),
-      `--secret`, `--timeout` (default 30), `--foreground`
-- [x] Create headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
-      `encode.h`, `auth.h`, `util.h`
-- [x] Create `test/test_runner.h` with test macros
-- [x] Create `test/test_runner.c` with passing harness
-- [x] `make test` passes
-- [x] `make style` runs (verified idempotent on clean code)
-
-> **Note:** `musl-gcc` is not available on this system — build falls back to
-> `cc` (gcc).  Install `musl-gcc` for production static builds.  `indent` is
-> available.
-
-## SHA-1 Implementation
-
-- [ ] Implement `sha1.c` — SHA-1 hash per RFC 3174
-- [ ] Unit tests: empty input, short string, known NIST vectors
-- [ ] ≥ 80 % line coverage on `sha1.c`
-- [ ] Zero warnings on `sha1.c`
-
 ## HMAC-SHA1 Implementation
 
 - [ ] Implement `hmac.c` — HMAC per RFC 2104 with SHA-1
@@ -60,9 +35,9 @@
 ## UDP Listener
 
 - [ ] Implement `udp.c` — bind, receive, address extraction
-- [ ] `udp_open(port)` — create and bind UDP socket, return fd (caller closes)
-- [ ] `udp_recv(fd, buf, len, addr)` — non-blocking receive with `recvfrom`
-- [ ] Handle `EAGAIN` / `EWOULDBLOCK` gracefully
+- [ ] `udp_open(port)` — create and bind UDP socket with `O_NONBLOCK`, return fd (caller closes)
+- [ ] `udp_recv(fd, buf, len, addr)` — non-blocking receive with `recvfrom` loop until `EAGAIN`
+- [ ] Handle `EAGAIN` / `EWOULDBLOCK` gracefully (normal termination)
 - [ ] Unit tests with mock socket via socketpair or loopback
 - [ ] ≥ 80 % line coverage on `udp.c`
 
@@ -77,12 +52,12 @@
 ## Daemon Main Loop
 
 - [ ] Wire up `main.c`: parse CLI → netlink_init → flush chain → add permanent rules →
-      UDP bind → privilege drop → poll loop
+      UDP bind → privilege drop → epoll loop
 - [ ] Signal handling: `SIGTERM`, `SIGINT` → graceful shutdown (cleanup rules, close sockets)
 - [ ] Logging: `LOG_ERR`, `LOG_WARNING`, `LOG_INFO`, `LOG_DEBUG` via `syslog` (or `stderr` in foreground)
 - [ ] `--foreground` flag: log to stderr instead of syslog
-- [ ] Poll loop: `poll()` on UDP socket with configurable interval (for session pruning)
-- [ ] Session pruning: remove expired entries from session table
+- [ ] Epoll loop: `epoll_wait()` (edge-triggered) on UDP socket, process all ready fds per call
+- [ ] Session pruning: remove expired entries from session table during idle epoll cycles
 - [ ] ≥ 80 % line coverage on `main.c` (excluding option parsing that calls `exit`)
 
 ## Client Tool
@@ -105,10 +80,10 @@
 ## Hardening & Audit
 
 - [ ] Privilege drop: `setuid`/`setgid` + `capng_clear` / `prctl(PR_CAP_AMBIENT)`
-- [ ] Seccomp filter: allow only `read`, `write`, `recvfrom`, `sendto`, `poll`,
-      `clock_gettime`, `getrandom`, `exit_group`
+- [ ] Seccomp filter: allow only `read`, `write`, `recvfrom`, `sendto`, `epoll_wait`,
+      `epoll_ctl`, `clock_gettime`, `getrandom`, `exit_group`
 - [ ] Configuration file permissions check: warn if world-readable
-- [ ] `select`/`poll` fd limit safety
+- [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
 - [ ] Reject overlong auth packets (> 256 bytes)
 - [ ] Stack canary test (compile with `-fstack-protector-strong`)
 - [ ] `-D_FORTIFY_SOURCE=2` compile flag

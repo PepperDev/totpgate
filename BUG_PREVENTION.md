@@ -39,4 +39,13 @@
 
 ## Past incidents
 
-_(Populated as bugs are found and fixed.)_
+### 2026-05-28: Wrong SHA-1 round constant K[20..39]
+
+**Bug**: `sha1.c` used `0x6ed6eba1` instead of the correct `0x6ed9eba1` for the
+SHA-1 round constant K in rounds 20–39.  Caused all hashes to be incorrect.
+
+**Root cause**: Typo when transcribing the constant from RFC 3174.
+
+**Prevention**: Verify all cryptographic constants against the RFC before
+marking the module complete.  Cross-check against `sha1sum` output for
+at least the empty string and "abc" vectors.
