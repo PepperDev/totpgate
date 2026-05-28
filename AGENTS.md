@@ -18,7 +18,8 @@ totpgate codebase.  **Read this first** before making any changes.
 
 ## 2.  Build invariants
 
-- **Compiler**: `musl-gcc` only (no glibc).
+- **Compiler**: `musl-gcc` preferred (falls back to `cc`; any C99 compiler works).
+  Static linking via `-static -flto` — no glibc dependency at runtime.
 - **C standard**: `-std=c99 -pedantic -pedantic-errors`.
 - **Flags**: `-O3 -Wall -Wextra -flto`.
 - **Link**: `-static -flto`.
@@ -107,27 +108,22 @@ Run: `make coverage`
 When multiple technical solutions are possible, always prefer the one that
 performs better under heavy workload.  Key principles:
 
-- **I/O multiplexing**: use `epoll` (edge-triggered) exclusively — never
-  `poll`, `select`, or `ppoll`.
+- **I/O multiplexing**: use `epoll` exclusively — never `poll`, `select`, or `ppoll`.
 - **Non-blocking**: every socket fd must be `O_NONBLOCK`.  Never use blocking
   I/O in the daemon's main loop.
-- **Batch processing**: `epoll_wait` with `maxevents >= 64` and process all
-  ready fds per call.
-- **Stack over heap**: prefer stack allocation; when heap is required, allocate
-  at init time, not per-request.
-- **Lock-free**: no mutexes in the hot path; use per-CPU data or
-  single-threaded event loop with lock-free ring buffers if cross-thread
-  communication is needed.
-- **Readiness vs completion**: use level-triggered `epoll` for listen sockets
-  (accept until EAGAIN) and edge-triggered for data sockets (loop read/write
-  until EAGAIN).
+- **Batch processing**: `epoll_wait` with `d->maxevents` (derived from
+  `RLIMIT_NOFILE`) and process all ready fds per call.
+- **Edge-triggered for data**: use `EPOLLET` on data sockets; loop
+  read/write until `EAGAIN` to avoid missing events.
+- **Level-triggered for control**: signal fds use level-triggered (default)
+  since each signal event must be consumed exactly once per wake-up.
 - **Memory**: fixed-size pools aren't just for embedded — they prevent
   allocation jitter under load.  Prefer a pre-allocated session pool with an
   SLAB-style free list.
 
 ---
 
-## 7.  Task lifecycle (TODO.md)
+## 6.  Task lifecycle (TODO.md)
 
 - Each **section** groups related tasks.
 - A task is **done** when:
@@ -143,7 +139,7 @@ performs better under heavy workload.  Key principles:
 
 ---
 
-## 8.  Bug prevention
+## 7.  Bug prevention
 
 Whenever a bug is fixed, evaluate its **recurrence likelihood**:
 
@@ -159,7 +155,7 @@ new task.
 
 ---
 
-## 9.  Privilege model
+## 8.  Privilege model
 
 - Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
 - If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `gcov`),

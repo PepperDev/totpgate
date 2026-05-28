@@ -24,7 +24,8 @@ The daemon `totpgated` accepts:
 |---|---|---|
 | `--port` | `2222` | UDP port the daemon listens for TOTP packets |
 | `--target-port` | `22` | TCP application port to protect |
-| `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
+| `--secret` | *(required)* | Shared secret (see §2.1 for encoding); mutually exclusive with `--secret-file` |
+| `--secret-file` | — | Path to file containing the shared secret (see §2.1 for encoding); mutually exclusive with `--secret` |
 | `--timeout` | `30` | Ephemeral rule lifetime in seconds |
 | `--min-block` | `300` | Min rate-limit block duration in seconds |
 | `--max-block` | `86400` | Max rate-limit block duration in seconds |

@@ -17,7 +17,12 @@ nobody/nogroup).
 .TP
 \fB\-\-secret\fR \fIsecret\fR
 Shared secret. Base32 by default; prefix with \fBhex:\fR or \fBb64:\fR
-for other encodings. (required)
+for other encodings. (required unless \fB\-\-secret-file\fR given)
+.TP
+\fB\-\-secret-file\fR \fIpath\fR
+Read shared secret from a file. The file content follows the same
+encoding rules as \fB\-\-secret\fR. Mutually exclusive with
+\fB\-\-secret\fR. A warning is emitted if the file is world-readable.
 .TP
 \fB\-\-port\fR \fIport\fR
 UDP listen port. (default: 2222)

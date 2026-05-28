@@ -4,7 +4,7 @@
 that listens on UDP for a valid TOTP and, upon matching, temporarily opens a
 TCP port via direct netlink firewall manipulation.
 
-No external binaries, no shared libraries — just a statically linked musl
+No external binaries, no shared libraries — just a statically linked
 binary speaking netlink directly to the kernel.
 
 ---
@@ -38,7 +38,7 @@ a time-based one-time password, making each grant unique and replay-proof.
 
 ### Requirements
 
-- `musl-gcc` (or a musl-targeting cross-compiler)
+- `musl-gcc` recommended (falls back to `cc`; any C99 compiler works)
 - Linux kernel headers (for `linux/netfilter.h`, `libnl`-ish macros)
 - `indent` (for code-style checks)
 
@@ -69,6 +69,7 @@ warnings** before the section is considered complete.
 
 ```sh
 totpgated --port 2222 --target-port 22 --secret "JBSWY3DPEHPK3PXP" --timeout 30
+totpgated --port 2222 --target-port 22 --secret-file /etc/totpgate.key --foreground
 totpgate  --secret "hex:48656c6c6f" --port 2222 server.example.com
 ```
 
@@ -79,7 +80,7 @@ When `totpgated` starts it flushes any stale rules from a prior session,
 inserts a permanent `ct state established,related accept` rule, and installs
 a silent `tcp dport <target-port> drop` for unmatched SYN packets.
 
-See the (future) man-pages or `--help` for full options.
+See the man pages (`totpgated.1`, `totpgate.1`) or `--help` for full options.
 
 ---
 
@@ -92,15 +93,19 @@ See the (future) man-pages or `--help` for full options.
 ├── BUG_PREVENTION.md— recurring-bug checklist
 ├── Makefile
 ├── src/             — source code
-│   ├── main.c
-│   ├── totp.c / .h
-│   ├── sha1.c / .h
-│   ├── hmac.c / .h
-│   ├── netlink.c / .h
-│   ├── udp.c / .h
-│   ├── config.c / .h
-│   ├── auth.c / .h
-│   └── util.c / .h
+│   ├── main.c       — daemon entrypoint, event loop, CLI parsing
+│   ├── client.c / h — CLI client tool
+│   ├── auth.c / .h  — auth packet parse / build
+│   ├── encode.c / h — base32, base64, hex decode
+│   ├── totp.c / .h  — TOTP token validation
+│   ├── sha1.c / .h  — SHA-1 hash
+│   ├── hmac.c / .h  — HMAC-SHA1
+│   ├── netlink.c / h— nftables rule management via netlink
+│   ├── udp.c / .h   — UDP socket bind / send / recv
+│   ├── privdrop.c/h— privilege drop & seccomp filter
+│   ├── ratelimit.c/h— per-IP rate limiting with backoff
+│   ├── seccomp.c / h— seccomp-BPF syscall filter
+│   └── util.c / .h  — logging helpers
 ├── test/            — unit tests (no third-party test libs)
 └── bin/             — build artifacts
 ```
