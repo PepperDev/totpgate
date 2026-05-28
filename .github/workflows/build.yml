@@ -161,7 +161,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           RPM_ARCH="${{ matrix.target.rpm_arch }}"
-          mkdir -p ~/rpmbuild/{SPECS,RPMS,SRPMS,BUILD,SOURCES}
+          RPMDIR="$HOME/rpmbuild"
+          mkdir -p "$RPMDIR"/{SPECS,RPMS,SRPMS,BUILD,SOURCES}
           {
             echo "Name: totpgate"
             echo "Version: $VERSION"
@@ -175,22 +176,22 @@ jobs:
             echo "TOTP token and temporarily opens a TCP port via direct netlink manipulation."
             echo ""
             echo "%install"
-            echo "mkdir -p %{buildroot}/usr/bin"
-            echo "mkdir -p %{buildroot}/usr/share/man/man1"
-            echo "install -m 755 %{_sourcedir}/totpgated %{buildroot}/usr/bin/"
-            echo "install -m 755 %{_sourcedir}/totpgate %{buildroot}/usr/bin/"
-            echo "install -m 644 %{_sourcedir}/totpgated.1 %{buildroot}/usr/share/man/man1/"
-            echo "install -m 644 %{_sourcedir}/totpgate.1 %{buildroot}/usr/share/man/man1/"
+            echo "mkdir -p \$RPM_BUILD_ROOT/usr/bin"
+            echo "mkdir -p \$RPM_BUILD_ROOT/usr/share/man/man1"
+            echo "install -m 755 %{_sourcedir}/totpgated \$RPM_BUILD_ROOT/usr/bin/"
+            echo "install -m 755 %{_sourcedir}/totpgate \$RPM_BUILD_ROOT/usr/bin/"
+            echo "install -m 644 %{_sourcedir}/totpgated.1 \$RPM_BUILD_ROOT/usr/share/man/man1/"
+            echo "install -m 644 %{_sourcedir}/totpgate.1 \$RPM_BUILD_ROOT/usr/share/man/man1/"
             echo ""
             echo "%files"
             echo "/usr/bin/totpgated"
             echo "/usr/bin/totpgate"
             echo "/usr/share/man/man1/totpgated.1*"
             echo "/usr/share/man/man1/totpgate.1*"
-          } > ~/rpmbuild/SPECS/totpgate.spec
-          cp dist/* ~/rpmbuild/SOURCES/
-          rpmbuild -ba ~/rpmbuild/SPECS/totpgate.spec >/dev/null 2>&1
-          cp ~/rpmbuild/RPMS/$RPM_ARCH/totpgate-$VERSION-1.$RPM_ARCH.rpm .
+          } > "$RPMDIR/SPECS/totpgate.spec"
+          cp dist/* "$RPMDIR/SOURCES/"
+          rpmbuild -ba --define "_topdir $RPMDIR" "$RPMDIR/SPECS/totpgate.spec"
+          cp "$RPMDIR/RPMS/$RPM_ARCH/totpgate-$VERSION-1.$RPM_ARCH.rpm" .
 
       - name: Upload artifact bundle
         uses: actions/upload-artifact@v4
