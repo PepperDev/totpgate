@@ -12,7 +12,29 @@ totpgate implements **Single Packet Authorization (SPA) using TOTP**.
 An unprivileged client sends a single UDP datagram containing a time-based
 one-time password.  The daemon validates the token against a pre-shared secret
 and, on success, temporarily inserts a netfilter rule that allows the client's
-IP to connect to a protected TCP port.
+IP to open a TCP connection to a protected port for 30 seconds.
+
+---
+
+## 1.1  CLI Interface
+
+The daemon `totpgated` accepts:
+
+| Argument | Default | Description |
+|---|---|---|
+| `--control-port` | `2222` | UDP port the daemon listens for TOTP packets |
+| `--port` | `22` | Target TCP port to protect |
+| `--secret` | *(required)* | Base32-encoded shared secret |
+| `--foreground` | off | Log to stderr instead of syslog |
+
+The client `totpgate` accepts:
+
+| Argument | Default | Description |
+|---|---|---|
+| `--secret` | *(required)* | Base32-encoded shared secret |
+| `--control-port` | `2222` | UDP port of the target daemon |
+| `<server>` | *(required)* | IP or hostname of the daemon |
+| `<target_port>` | — | Override default target port (optional) |
 
 ---
 
@@ -70,11 +92,21 @@ Attributes:
 
 - **Table**: `totpgate` (created by daemon at startup).
 - **Chain**: `input` (hook `NF_INET_LOCAL_IN`, priority 0).
-- **Match**: `src <client_ip>`, `tcp dport <target_port>`.
-- **Action**: `accept`.
-- **Expiration**: set via nftables timeout mechanism.
-- **Handle**: returned by kernel on insert; used for early delete on
-  re-authentication.
+- **Default policy**: `accept` (all non-matching traffic passes through).
+
+**Permanent rules** (installed at startup, never expire):
+
+| Priority | Match | Action |
+|---|---|---|
+| 0 | `ct state established,related` | `accept` |
+| — | `tcp dport != <target_port>` | `accept` (skip non-target) |
+| — | `tcp dport <target_port>` | `drop` (silent, unmatched SYN) |
+
+**Ephemeral rules** (inserted on successful auth, auto-expire after 30 s):
+
+| Match | Action |
+|---|---|
+| `ip saddr <client_ip> tcp dport <target_port> ct state new` | `accept` |
 
 ### 2.6  `auth_session`
 
@@ -125,40 +157,38 @@ token whose counter ≤ stored counter for that IP.
 Note: because each window is 30 s wide, a token could be replayed within the
 same window.  The `seq` counter prevents this.
 
-### BR-4  Firewall rule lifecycle
+### BR-4  Startup firewall setup
+
+```
+ON  startup:
+    IF  table "totpgate" does not exist:
+        create table "totpgate"
+    IF  chain "input" does not exist:
+        create chain "input" (hook input, priority 0)
+    flush chain "totpgate input"          // removes stale rules
+    insert rule: ct state established,related accept   // permanent
+    insert rule: tcp dport <target> drop              // default-drop
+```
+
+### BR-5  Auth-grant lifecycle
 
 ```
 ON  successful authentication:
-    IF  a rule for <src_ip>:<dst_port> already exists:
-        (a) delete old rule using its handle
-        (b) insert new rule with fresh timeout
-    ELSE:
-        insert new rule with timeout <lifetime>
+    insert rule: ip saddr <client_ip> tcp dport <target> ct state new accept
+                  // auto-expires after 30 seconds
 ```
 
-### BR-5  Privilege drop
+### BR-6  Privilege drop
 
 ```
 AFTER  UDP socket is bound (< 1024 requires CAP_NET_BIND_SERVICE):
     drop all capabilities, setuid/gid to <unprivileged_user>
 ```
 
-### BR-6  Configuration file
+### BR-7  Ephemeral rule timeout
 
-Format: `KEY=VALUE` lines, one per line.  Lines starting with `#` are
-comments.  Keys:
-
-| Key | Required | Default | Description |
-|---|---|---|---|
-| `SECRET` | yes | — | Base32-encoded shared secret |
-| `LISTEN_PORT` | yes | — | UDP port the daemon listens on |
-| `TARGET_PORT` | yes | — | Default TCP port to protect |
-| `ALLOWED_USERS` | no | `nobody:nogroup` | `user:group` to drop to |
-| `AUTH_TIMEOUT` | no | `60` | Default rule lifetime (seconds) |
-| `TOTP_DIGITS` | no | `6` | Number of TOTP digits (6–8) |
-| `TOTP_STEP` | no | `30` | TOTP time step (seconds) |
-| `DRIFT_AHEAD` | no | `1` | Future windows to accept |
-| `DRIFT_BEHIND` | no | `1` | Past windows to accept |
+All auth-granted rules have a fixed 30-second lifetime.  The kernel
+automatically removes them after expiry.
 
 ---
 
@@ -167,9 +197,14 @@ comments.  Keys:
 ```
 START
   │
-  ├─ 1. Load & validate configuration
-  ├─ 2. Create nftables table & chain (totpgate/input)
-  ├─ 3. Bind UDP socket to <listen_port>
+  ├─ 1. Parse CLI arguments (--control-port, --port, --secret)
+  ├─ 2. Validate & prepare nftables table
+  │      ├─ create table "totpgate" if missing
+  │      ├─ create chain "input" if missing
+  │      ├─ flush chain (remove stale rules from prior session)
+  │      ├─ insert: ct state established,related accept
+  │      └─ insert: tcp dport <target> drop
+  ├─ 3. Bind UDP socket to <control_port>
   ├─ 4. Drop privileges
   │
   └─ LOOP:
@@ -177,9 +212,9 @@ START
        ├─ 6. Parse auth_packet
        ├─ 7. Validate TOTP
        ├─ 8. Check anti-replay seq counter
-       ├─ 9. Insert / refresh nftables rule
+       ├─ 9. Insert nftables rule (30s timeout)
        ├─10. Log success / failure
-       └─11. Prune expired sessions
+       └─11. Prune expired auth session records
 ```
 
 ---

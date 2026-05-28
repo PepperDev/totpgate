@@ -67,10 +67,17 @@ warnings** before the section is considered complete.
 
 ## Usage
 
+```sh
+totpgated --control-port 2222 --port 22 --secret <base32_secret>
+totpgate  --secret <base32_secret> --control-port 2222 <server> [target_port]
 ```
-totpgated -c /etc/totpgate.conf
-totpgate   -s <secret> -p <port> <server>
-```
+
+The daemon listens on UDP `--control-port` for a valid TOTP.  On match the
+sender's IP is allowed to open a TCP connection to `--port` for 30 seconds.
+
+When `totpgated` starts it flushes any stale rules from a prior session,
+inserts a permanent `ct state established,related accept` rule, and installs
+a silent `tcp dport <port> drop` for unmatched SYN packets.
 
 See the (future) man-pages or `--help` for full options.
 
