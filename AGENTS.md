@@ -147,8 +147,7 @@ Whenever a bug is fixed, evaluate its **recurrence likelihood**:
 |---|---|
 | Low | No action |
 | Medium | Add a note to `BUG_PREVENTION.md` |
-| High | Add a checklist item to `BUG_PREVENTION.md` AND add a
-         matching test case |
+| High | Add a checklist item to `BUG_PREVENTION.md` AND add a matching test case |
 
 Also consult `BUG_PREVENTION.md` as part of the **done criteria** for every
 new task.

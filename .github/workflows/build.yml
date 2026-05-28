@@ -126,17 +126,17 @@ jobs:
           install -m 644 dist/totpgate.1 "$PKGDIR/usr/share/man/man1/"
           gzip -9 "$PKGDIR/usr/share/man/man1/totpgated.1"
           gzip -9 "$PKGDIR/usr/share/man/man1/totpgate.1"
-          cat > "$PKGDIR/DEBIAN/control" <<-EOF
-Package: totpgate
-Version: $VERSION
-Section: net
-Priority: optional
-Architecture: $DEB_ARCH
-Maintainer: totpgate contributors
-Description: Single Packet Authorization via TOTP
- A lightweight port knocking daemon for Linux. Listens on UDP for a valid
- TOTP token and temporarily opens a TCP port via direct netlink manipulation.
-EOF
+          {
+            echo "Package: totpgate"
+            echo "Version: $VERSION"
+            echo "Section: net"
+            echo "Priority: optional"
+            echo "Architecture: $DEB_ARCH"
+            echo "Maintainer: totpgate contributors"
+            echo "Description: Single Packet Authorization via TOTP"
+            echo " A lightweight port knocking daemon for Linux. Listens on UDP for a valid"
+            echo " TOTP token and temporarily opens a TCP port via direct netlink manipulation."
+          } > "$PKGDIR/DEBIAN/control"
           dpkg-deb --build "$PKGDIR" >/dev/null
 
       - name: Install rpm
@@ -147,32 +147,32 @@ EOF
           VERSION="${{ steps.version.outputs.version }}"
           RPM_ARCH="${{ matrix.target.rpm_arch }}"
           mkdir -p ~/rpmbuild/{SPECS,RPMS,SRPMS,BUILD,SOURCES}
-          cat > ~/rpmbuild/SPECS/totpgate.spec <<-EOF
-Name: totpgate
-Version: $VERSION
-Release: 1
-Summary: Single Packet Authorization via TOTP
-License: MIT
-Group: Applications/System
-BuildArch: $RPM_ARCH
-%description
-A lightweight port knocking daemon for Linux. Listens on UDP for a valid
-TOTP token and temporarily opens a TCP port via direct netlink manipulation.
-
-%install
-mkdir -p %{buildroot}/usr/bin
-mkdir -p %{buildroot}/usr/share/man/man1
-install -s -m 755 %{_sourcedir}/totpgated %{buildroot}/usr/bin/
-install -s -m 755 %{_sourcedir}/totpgate %{buildroot}/usr/bin/
-install -m 644 %{_sourcedir}/totpgated.1 %{buildroot}/usr/share/man/man1/
-install -m 644 %{_sourcedir}/totpgate.1 %{buildroot}/usr/share/man/man1/
-
-%files
-/usr/bin/totpgated
-/usr/bin/totpgate
-/usr/share/man/man1/totpgated.1*
-/usr/share/man/man1/totpgate.1*
-EOF
+          {
+            echo "Name: totpgate"
+            echo "Version: $VERSION"
+            echo "Release: 1"
+            echo "Summary: Single Packet Authorization via TOTP"
+            echo "License: MIT"
+            echo "Group: Applications/System"
+            echo "BuildArch: $RPM_ARCH"
+            echo "%description"
+            echo "A lightweight port knocking daemon for Linux. Listens on UDP for a valid"
+            echo "TOTP token and temporarily opens a TCP port via direct netlink manipulation."
+            echo ""
+            echo "%install"
+            echo "mkdir -p %{buildroot}/usr/bin"
+            echo "mkdir -p %{buildroot}/usr/share/man/man1"
+            echo "install -s -m 755 %{_sourcedir}/totpgated %{buildroot}/usr/bin/"
+            echo "install -s -m 755 %{_sourcedir}/totpgate %{buildroot}/usr/bin/"
+            echo "install -m 644 %{_sourcedir}/totpgated.1 %{buildroot}/usr/share/man/man1/"
+            echo "install -m 644 %{_sourcedir}/totpgate.1 %{buildroot}/usr/share/man/man1/"
+            echo ""
+            echo "%files"
+            echo "/usr/bin/totpgated"
+            echo "/usr/bin/totpgate"
+            echo "/usr/share/man/man1/totpgated.1*"
+            echo "/usr/share/man/man1/totpgate.1*"
+          } > ~/rpmbuild/SPECS/totpgate.spec
           cp dist/* ~/rpmbuild/SOURCES/
           rpmbuild -ba ~/rpmbuild/SPECS/totpgate.spec >/dev/null 2>&1
           cp ~/rpmbuild/RPMS/$RPM_ARCH/totpgate-$VERSION-1.$RPM_ARCH.rpm .
