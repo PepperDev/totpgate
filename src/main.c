@@ -12,6 +12,7 @@
 #include <syslog.h>
 #include "encode.h"
 #include "privdrop.h"
+#include "seccomp.h"
 #include "netlink.h"
 #include "udp.h"
 #include "auth.h"
@@ -410,6 +411,8 @@ int daemon_run(struct config *cfg)
     daemon_cleanup(&d);
     return 1;
   }
+
+  install_seccomp(cfg->foreground);
 
   while (daemon_process(&d) == 0) {
     if (cfg->test_mode)

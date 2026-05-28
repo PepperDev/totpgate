@@ -16,8 +16,7 @@
 
 ## Hardening & Audit
 
-- [ ] Privilege drop: `setuid`/`setgid` + `capng_clear` / `prctl(PR_CAP_AMBIENT)`
-- [ ] Seccomp filter: allow only `read`, `write`, `recvfrom`, `sendto`, `epoll_wait`,
-      `epoll_ctl`, `clock_gettime`, `getrandom`, `exit_group`
+- [x] Privilege drop: `setuid`/`setgid` + `prctl(PR_SET_NO_NEW_PRIVS)`
+- [x] Seccomp filter: allowlist of glibc-compatible syscalls via BPF
 - [ ] Configuration file permissions check: warn if world-readable
 - [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
