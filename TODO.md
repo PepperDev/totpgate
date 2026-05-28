@@ -7,18 +7,21 @@
 
 ## Project Foundation
 
-- [ ] Create Makefile with static musl build, test, style, coverage targets
-- [ ] Create directory layout: `src/`, `test/`, `bin/`, `obj/`
-- [ ] Verify `musl-gcc` and `indent` are available; document missing tool policy
-- [ ] Create `src/main.c` with CLI option parsing using `getopt_long`:
+- [x] Create Makefile with static musl build, test, style, coverage targets
+- [x] Create directory layout: `src/`, `test/`, `bin/`, `obj/`
+- [x] Create `src/main.c` with CLI option parsing using `getopt_long`:
       `--port` (default 2222), `--target-port` (default 22),
       `--secret`, `--timeout` (default 30), `--foreground`
-- [ ] Create empty headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
+- [x] Create headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
       `encode.h`, `auth.h`, `util.h`
-- [ ] Create `test/test_runner.h` with minimal test macros (ASSERT_INT_EQ, ASSERT_STREQ, etc.)
-- [ ] Create `test/test_runner.c` that runs all registered tests
-- [ ] `make test` passes (no tests yet, but framework compiles)
-- [ ] `make style` runs without error
+- [x] Create `test/test_runner.h` with test macros
+- [x] Create `test/test_runner.c` with passing harness
+- [x] `make test` passes
+- [x] `make style` runs (verified idempotent on clean code)
+
+> **Note:** `musl-gcc` is not available on this system — build falls back to
+> `cc` (gcc).  Install `musl-gcc` for production static builds.  `indent` is
+> available.
 
 ## Encoding Utilities
 
