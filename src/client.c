@@ -10,20 +10,12 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include "client.h"
 #include "encode.h"
 #include "totp.h"
 
 #define TOTP_DIGITS 6
 #define TOTP_STEP 30
-
-struct client_cfg {
-  unsigned char secret[256];
-  size_t secret_len;
-  uint16_t port;
-  char server[256];
-  uint16_t target_port;
-  int have_target_port;
-};
 
 static void print_usage(const char *prog)
 {
@@ -38,7 +30,7 @@ static void print_usage(const char *prog)
           "  --help                  Show this help\n", prog);
 }
 
-static int parse_args(struct client_cfg *cfg, int argc, char *argv[])
+int parse_args(struct client_cfg *cfg, int argc, char *argv[])
 {
   static const struct option long_opts[] = {
     {"port", required_argument, NULL, 'p'},
@@ -114,7 +106,7 @@ static int parse_args(struct client_cfg *cfg, int argc, char *argv[])
   return 0;
 }
 
-static int client_run(struct client_cfg *cfg)
+int client_run(struct client_cfg *cfg)
 {
   char pkt[64];
   size_t pkt_len;
@@ -181,6 +173,7 @@ static int client_run(struct client_cfg *cfg)
   return 0;
 }
 
+#ifndef CLIENT_CORE_ONLY
 int main(int argc, char *argv[])
 {
   struct client_cfg cfg;
@@ -191,3 +184,4 @@ int main(int argc, char *argv[])
 
   return client_run(&cfg) != 0 ? 1 : 0;
 }
+#endif

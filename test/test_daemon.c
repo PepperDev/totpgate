@@ -444,6 +444,102 @@ static void test_daemon_process_packet(void)
   auth_replay_reset();
 }
 
+static void test_daemon_malformed_packet(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  int i;
+  int s;
+  struct sockaddr_in addr;
+
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2223;
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* stage malformed data (non-numeric) in mock recv buffer */
+  g_udp_recv_len = 6;
+  memcpy(g_udp_recv_buf, "abcdef", 6);
+  g_udp_recv_src_ip = 0x01010101;
+  g_udp_recv_src_port = 54321;
+
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  ASSERT_TRUE(s >= 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(2223);
+  addr.sin_addr.s_addr = htonl(0x7f000001);
+  sendto(s, "x", 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+  close(s);
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* verify netlink_insert was NOT called (ip should be 0) */
+  ASSERT_INT_EQ((int)g_nl_insert_ip, 0);
+
+  daemon_cleanup(&d);
+}
+
+static void test_daemon_truncated_packet(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  int i;
+  int s;
+  struct sockaddr_in addr;
+
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = 2224;
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* stage truncated packet (only 3 digits — too short) */
+  g_udp_recv_len = 3;
+  memcpy(g_udp_recv_buf, "123", 3);
+  g_udp_recv_src_ip = 0x02020202;
+  g_udp_recv_src_port = 12345;
+
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  ASSERT_TRUE(s >= 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(2224);
+  addr.sin_addr.s_addr = htonl(0x7f000001);
+  sendto(s, "x", 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+  close(s);
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* verify netlink_insert was NOT called */
+  ASSERT_INT_EQ((int)g_nl_insert_ip, 0);
+
+  daemon_cleanup(&d);
+}
+
 /* ---- auth_replay tests for prune ---- */
 
 static void test_prune_expired(void)
@@ -489,7 +585,8 @@ TEST(test_parse_minimal),
       TEST(test_setup_foreground_off),
       TEST(test_daemon_run_test_mode),
       TEST(test_daemon_run_setup_fail),
-      TEST(test_daemon_process_packet), TEST(test_prune_expired), TEST(test_prune_fresh_kept), END_TEST};
+      TEST(test_daemon_process_packet), TEST(test_daemon_malformed_packet),
+      TEST(test_daemon_truncated_packet), TEST(test_prune_expired), TEST(test_prune_fresh_kept), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)
