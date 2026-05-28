@@ -18,7 +18,7 @@
 
 - [x] Privilege drop: `setuid`/`setgid` + `prctl(PR_SET_NO_NEW_PRIVS)`
 - [x] Seccomp filter: allowlist of glibc-compatible syscalls via BPF
-- [ ] Configuration file permissions check: warn if world-readable
+- [x] Configuration file permissions check: warn if world-readable (via --secret-file)
 - [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
 
 ## CI / CD

@@ -33,6 +33,7 @@ struct daemon {
   int udp_fd;
   int epoll_fd;
   int signal_fd;
+  int maxevents;
   time_t last_prune;
 };
 

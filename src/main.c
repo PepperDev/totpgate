@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/epoll.h>
+#include <sys/resource.h>
 #include <sys/signalfd.h>
 #include <syslog.h>
 #include <sys/stat.h>
@@ -47,6 +48,7 @@ struct daemon {
   int udp_fd;
   int epoll_fd;
   int signal_fd;
+  int maxevents;
   time_t last_prune;
 };
 
@@ -289,6 +291,15 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   d->signal_fd = -1;
   d->last_prune = 0;
 
+  {
+    struct rlimit rl;
+    d->maxevents = EPOLL_MAXEVENTS;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+      if ((rlim_t) d->maxevents > rl.rlim_cur)
+        d->maxevents = (int)rl.rlim_cur;
+    }
+  }
+
   if (!cfg->foreground) {
     openlog("totpgated", LOG_PID | LOG_NDELAY, LOG_DAEMON);
   }
@@ -369,7 +380,7 @@ int daemon_process(struct daemon *d)
   time_t now;
   char logbuf[128];
 
-  nfds = epoll_wait(d->epoll_fd, events, EPOLL_MAXEVENTS, 1000);
+  nfds = epoll_wait(d->epoll_fd, events, d->maxevents, 1000);
   if (nfds < 0) {
     if (errno == EINTR)
       return 0;
