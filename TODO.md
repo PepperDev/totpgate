@@ -5,15 +5,6 @@
 
 ---
 
-## TOTP Implementation
-
-- [ ] Implement `totp.c` — TOTP per RFC 6238
-- [ ] `totp_generate(secret, len, time_counter, digits)` returns token
-- [ ] `totp_validate(secret, len, token, digits, step, drift_behind, drift_ahead, now)` returns bool
-- [ ] Support 6–8 digit tokens
-- [ ] Unit tests: RFC 6238 test vectors (SHA-1 variant)
-- [ ] ≥ 80 % line coverage on `totp.c`
-
 ## Netlink Firewall Module
 
 - [ ] Implement `netlink.c` — create/flush/delete nftables table & chain via netlink
