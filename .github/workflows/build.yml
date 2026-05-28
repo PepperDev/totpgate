@@ -5,48 +5,260 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Create a GitHub release and publish artifacts
+        type: boolean
+        default: false
+      tag:
+        description: Semver tag (e.g. v1.2.3). Leave empty to auto-increment from latest.
+        type: string
+        default: ''
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y indent
-      - name: Build
-        run: make
-      - name: Test
-        run: make test
-      - name: Style check
-        run: make style && git diff --exit-code
+      - run: sudo apt-get update && sudo apt-get install -y indent
+      - run: make
+      - run: make test
+      - run: make style && git diff --exit-code
       - name: Coverage
-        run: make coverage
+        run: make coverage 2>&1 | tee coverage_output.txt
+      - name: Coverage summary
+        run: |
+          {
+            echo '## Code Coverage'
+            echo ''
+            echo '```'
+            sed -n '/=== Line coverage per module ===/,$p' coverage_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: test
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true')
     strategy:
       matrix:
         target:
-          - { name: x86_64, cc: gcc, pkg: gcc }
-          - { name: i686, cc: i686-linux-gnu-gcc, pkg: gcc-i686-linux-gnu }
-          - { name: armhf, cc: arm-linux-gnueabihf-gcc, pkg: gcc-arm-linux-gnueabihf }
-          - { name: armv7, cc: arm-linux-gnueabi-gcc, pkg: gcc-arm-linux-gnueabi }
-          - { name: aarch64, cc: aarch64-linux-gnu-gcc, pkg: gcc-aarch64-linux-gnu }
+          - name: x86_64
+            cc: gcc
+            pkg: gcc
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - name: i686
+            cc: i686-linux-gnu-gcc
+            pkg: gcc-i686-linux-gnu
+            deb_arch: i386
+            rpm_arch: i386
+          - name: armhf
+            cc: arm-linux-gnueabihf-gcc
+            pkg: gcc-arm-linux-gnueabihf
+            deb_arch: armhf
+            rpm_arch: armv7hl
+          - name: armv7
+            cc: arm-linux-gnueabi-gcc
+            pkg: gcc-arm-linux-gnueabi
+            deb_arch: armel
+            rpm_arch: armv7hl
+          - name: aarch64
+            cc: aarch64-linux-gnu-gcc
+            pkg: gcc-aarch64-linux-gnu
+            deb_arch: arm64
+            rpm_arch: aarch64
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            case "$TAG" in
+              v*) ;;
+              *) TAG="v$TAG" ;;
+            esac
+          else
+            LAST=$(git tag --sort=-v:refname | head -1)
+            if [ -z "$LAST" ]; then
+              TAG="v0.1.0"
+            else
+              TAG=$(echo "$LAST" | awk -F. '/^v/ {printf "v%d.%d.%d", $1+0, $2+0, $3+1}')
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Install cross compiler
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.target.pkg }}
-      - name: Build daemon
-        run: make CC=${{ matrix.target.cc }} CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -fstack-protector-strong" LDFLAGS="-static -flto"
-      - name: Archive
+
+      - name: Build
+        run: make CC="${{ matrix.target.cc }}" CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -fstack-protector-strong" LDFLAGS="-static -flto"
+
+      - name: Prepare dist
         run: |
-          mkdir -p artifacts
-          cp bin/totpgated bin/totpgate artifacts/
-      - uses: actions/upload-artifact@v4
+          mkdir -p dist
+          cp bin/totpgated bin/totpgate dist/
+          cp man/totpgated.1 man/totpgate.1 dist/
+
+      - name: Package tar.xz
+        run: |
+          tar -cJf "totpgate-${{ matrix.target.name }}-${{ steps.version.outputs.version }}.tar.xz" -C dist .
+
+      - name: Package .deb
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB_ARCH="${{ matrix.target.deb_arch }}"
+          PKGDIR="totpgate_${VERSION}_${DEB_ARCH}"
+          mkdir -p "$PKGDIR/DEBIAN" "$PKGDIR/usr/bin" "$PKGDIR/usr/share/man/man1"
+          install -s -m 755 dist/totpgated "$PKGDIR/usr/bin/"
+          install -s -m 755 dist/totpgate "$PKGDIR/usr/bin/"
+          install -m 644 dist/totpgated.1 "$PKGDIR/usr/share/man/man1/"
+          install -m 644 dist/totpgate.1 "$PKGDIR/usr/share/man/man1/"
+          gzip -9 "$PKGDIR/usr/share/man/man1/totpgated.1"
+          gzip -9 "$PKGDIR/usr/share/man/man1/totpgate.1"
+          cat > "$PKGDIR/DEBIAN/control" <<-EOF
+Package: totpgate
+Version: $VERSION
+Section: net
+Priority: optional
+Architecture: $DEB_ARCH
+Maintainer: totpgate contributors
+Description: Single Packet Authorization via TOTP
+ A lightweight port knocking daemon for Linux. Listens on UDP for a valid
+ TOTP token and temporarily opens a TCP port via direct netlink manipulation.
+EOF
+          dpkg-deb --build "$PKGDIR" >/dev/null
+
+      - name: Install rpm
+        run: sudo apt-get install -y rpm 2>/dev/null
+
+      - name: Package .rpm
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          RPM_ARCH="${{ matrix.target.rpm_arch }}"
+          mkdir -p ~/rpmbuild/{SPECS,RPMS,SRPMS,BUILD,SOURCES}
+          cat > ~/rpmbuild/SPECS/totpgate.spec <<-EOF
+Name: totpgate
+Version: $VERSION
+Release: 1
+Summary: Single Packet Authorization via TOTP
+License: MIT
+Group: Applications/System
+BuildArch: $RPM_ARCH
+%description
+A lightweight port knocking daemon for Linux. Listens on UDP for a valid
+TOTP token and temporarily opens a TCP port via direct netlink manipulation.
+
+%install
+mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/share/man/man1
+install -s -m 755 %{_sourcedir}/totpgated %{buildroot}/usr/bin/
+install -s -m 755 %{_sourcedir}/totpgate %{buildroot}/usr/bin/
+install -m 644 %{_sourcedir}/totpgated.1 %{buildroot}/usr/share/man/man1/
+install -m 644 %{_sourcedir}/totpgate.1 %{buildroot}/usr/share/man/man1/
+
+%files
+/usr/bin/totpgated
+/usr/bin/totpgate
+/usr/share/man/man1/totpgated.1*
+/usr/share/man/man1/totpgate.1*
+EOF
+          cp dist/* ~/rpmbuild/SOURCES/
+          rpmbuild -ba ~/rpmbuild/SPECS/totpgate.spec >/dev/null 2>&1
+          cp ~/rpmbuild/RPMS/$RPM_ARCH/totpgate-$VERSION-1.$RPM_ARCH.rpm .
+
+      - name: Upload artifact bundle
+        uses: actions/upload-artifact@v4
         with:
-          name: totpgate-${{ matrix.target.name }}
-          path: artifacts/*
+          name: totpgate-${{ matrix.target.name }}-${{ steps.version.outputs.version }}
+          path: |
+            totpgate-${{ matrix.target.name }}-${{ steps.version.outputs.version }}.tar.xz
+            totpgate_${{ steps.version.outputs.version }}_${{ matrix.target.deb_arch }}.deb
+            totpgate-${{ steps.version.outputs.version }}-1.${{ matrix.target.rpm_arch }}.rpm
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            case "$TAG" in
+              v*) ;;
+              *) TAG="v$TAG" ;;
+            esac
+          else
+            LAST=$(git tag --sort=-v:refname | head -1)
+            if [ -z "$LAST" ]; then
+              TAG="v0.1.0"
+            else
+              TAG=$(echo "$LAST" | awk -F. '/^v/ {printf "v%d.%d.%d", $1+0, $2+0, $3+1}')
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: |
+          {
+            echo "## Changelog"
+            echo ""
+            PREV=$(git describe --tags --abbrev=0 2>/dev/null || true)
+            if [ -n "$PREV" ]; then
+              git log "$PREV..HEAD" --oneline --no-decorate
+            else
+              git log --oneline --no-decorate
+            fi
+          } > changelog.md
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: totpgate-*-${{ steps.tag.outputs.version }}
+          merge-multiple: true
+
+      - name: Create tag
+        if: github.event_name != 'release'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}"
+
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes-file changelog.md \
+            *.tar.xz *.deb *.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts to existing release
+        if: github.event_name == 'release'
+        run: |
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            *.tar.xz *.deb *.rpm --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
