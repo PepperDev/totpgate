@@ -82,7 +82,7 @@ int install_seccomp(int foreground)
     if (foreground)
       fprintf(stderr, "warning: seccomp filter not available: %s\n", strerror(errno));
     else
-      syslog(LOG_WARNING, "seccomp filter not available: %m");
+      syslog(LOG_WARNING, "seccomp filter not available: %s", strerror(errno));
     return -1;
   }
 

@@ -43,28 +43,28 @@ int drop_privileges(const char *user, const char *group, int foreground)
     if (foreground)
       fprintf(stderr, "error: drop_privileges: setgroups: %s\n", strerror(errno));
     else
-      syslog(LOG_ERR, "drop_privileges: setgroups: %m");
+      syslog(LOG_ERR, "drop_privileges: setgroups: %s", strerror(errno));
     return -1;
   }
   if (setgid(gid) != 0) {
     if (foreground)
       fprintf(stderr, "error: drop_privileges: setgid: %s\n", strerror(errno));
     else
-      syslog(LOG_ERR, "drop_privileges: setgid: %m");
+      syslog(LOG_ERR, "drop_privileges: setgid: %s", strerror(errno));
     return -1;
   }
   if (setuid(uid) != 0) {
     if (foreground)
       fprintf(stderr, "error: drop_privileges: setuid: %s\n", strerror(errno));
     else
-      syslog(LOG_ERR, "drop_privileges: setuid: %m");
+      syslog(LOG_ERR, "drop_privileges: setuid: %s", strerror(errno));
     return -1;
   }
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
     if (foreground)
       fprintf(stderr, "error: drop_privileges: PR_SET_NO_NEW_PRIVS: %s\n", strerror(errno));
     else
-      syslog(LOG_ERR, "drop_privileges: PR_SET_NO_NEW_PRIVS: %m");
+      syslog(LOG_ERR, "drop_privileges: PR_SET_NO_NEW_PRIVS: %s", strerror(errno));
     return -1;
   }
 
