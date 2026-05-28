@@ -1,0 +1,140 @@
+# AGENTS — Development Guidelines
+
+This file governs how AI agents (including future sessions) interact with the
+totpgate codebase.  **Read this first** before making any changes.
+
+---
+
+## 1.  Reference documents
+
+| File | Purpose |
+|---|---|
+| `DOMAIN.md` | Business rules, entities, glossary |
+| `TODO.md` | Task list with section-completion rules |
+| `BUG_PREVENTION.md` | Checklist of recurring bugs to guard against |
+| `Makefile` | Single entry point for build / test / lint |
+
+---
+
+## 2.  Build invariants
+
+- **Compiler**: `musl-gcc` only (no glibc).
+- **C standard**: `-std=c99 -pedantic -pedantic-errors`.
+- **Flags**: `-O3 -Wall -Wextra -flto`.
+- **Link**: `-static -flto`.
+- **Dependency tracking**: `-MMD -MP` — `.d` files are generated and included.
+- **Binary destination**: `bin/`.
+- **Style**: `indent -linux -120 -i2 -nut` — run `make style` to auto-format.
+- **Braces**: always wrap blocks with braces, even single-line `if`/`for`/`while`/`do`.
+- **No third-party libraries**: implement everything from scratch (SHA1, HMAC,
+  netlink helpers, test framework, …).
+- **No external binaries**: manipulate firewall rules via netlink sockets
+  directly — never shell out to `iptables`, `nft`, or `ip`.
+
+---
+
+## 3.  Coding conventions
+
+### 3.1  General
+
+- Write for **human comprehension**.  Prefer clear names over clever tricks.
+- **Avoid code duplication**.  Extract shared logic into static helpers.
+- **Lightweight**: save resources, worship performance, neat memory management.
+- Apply **SOLID** principles — especially Single Responsibility and
+  Dependency Inversion.
+- Functions should be **agnostic**: receive arguments, process, return results.
+  Avoid global / file-scope mutable state as much as possible.
+- Return `int` error codes (0 = success, negative = errno-style).
+- Assert pre-conditions with `assert()` from `<assert.h>`.
+
+### 3.2  Naming
+
+| Element | Convention | Example |
+|---|---|---|
+| Functions | `snake_case` | `totp_validate` |
+| Globals | `g_` prefix | `g_config` |
+| Macros / enums | `UPPER_SNAKE` | `TOTP_DIGITS` |
+| Types | `snake_case_t` | `totp_ctx_t` |
+| File-local | `static` | |
+
+### 3.3  Error handling
+
+- Check every syscall / function return.
+- On failure, set `errno` and return negative.
+- Top-level `main()` prints `strerror(errno)` before exiting.
+
+### 3.4  Memory
+
+- Prefer stack allocation.
+- When heap is required, `calloc` + paired `free`, no `malloc`/`realloc` without
+  zeroing.
+- No variable-length arrays (VLAs are problematic in C99 in practice).
+
+---
+
+## 4.  Testing
+
+### 4.1  Framework
+
+There is **no third-party test library**.  The test runner lives in
+`test/test_runner.c` and provides:
+
+- `TEST_GROUP(name)` / `TEST(name)` / `END_TEST`
+- `ASSERT_INT_EQ`, `ASSERT_PTR_EQ`, `ASSERT_STREQ`, `ASSERT_TRUE`,
+  `ASSERT_FALSE`
+- `RUN_TEST(group, name)`
+- `RUN_GROUP(group)` — runs all tests in a group
+
+### 4.2  Mocks
+
+Mocks are **stubs** — hand-written functions in `test/mock_*.c` that replace
+real implementations at link time.  The Makefile compiles either the real
+module or the mock variant depending on the target.
+
+### 4.3  Coverage gate
+
+Every TODO section requires:
+
+1. **Zero compiler warnings** (`-Wall -Wextra -pedantic-errors`).
+2. **≥ 80 % line coverage** measured by `gcov`.
+
+Run: `make coverage`
+
+---
+
+## 5.  Task lifecycle (TODO.md)
+
+- Each **section** groups related tasks.
+- A task is **done** when:
+  - Code compiles with zero warnings.
+  - Line coverage ≥ 80 %.
+  - `make test` passes.
+  - `make style` has been run.
+  - `BUG_PREVENTION.md` has been reviewed for applicable items.
+- When **all** tasks in a section are done, **delete the entire section** from
+  `TODO.md`.
+
+---
+
+## 6.  Bug prevention
+
+Whenever a bug is fixed, evaluate its **recurrence likelihood**:
+
+| Likelihood | Action |
+|---|---|
+| Low | No action |
+| Medium | Add a note to `BUG_PREVENTION.md` |
+| High | Add a checklist item to `BUG_PREVENTION.md` AND add a
+         matching test case |
+
+Also consult `BUG_PREVENTION.md` as part of the **done criteria** for every
+new task.
+
+---
+
+## 7.  Privilege model
+
+- Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
+- If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `gcov`),
+  ask the user to install it rather than failing silently.
+- The daemon itself drops privileges early after binding the UDP socket.
