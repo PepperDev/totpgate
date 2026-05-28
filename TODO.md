@@ -14,14 +14,7 @@
 - [x] `LICENSE` file (MIT)
 - [x] Man pages: `totpgated.1`, `totpgate.1`
 
-## Hardening & Audit
-
-- [x] Privilege drop: `setuid`/`setgid` + `prctl(PR_SET_NO_NEW_PRIVS)`
-- [x] Seccomp filter: allowlist of glibc-compatible syscalls via BPF
-- [x] Configuration file permissions check: warn if world-readable (via --secret-file)
-- [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
-
 ## CI / CD
 
-- [ ] GitHub Actions workflow to build and produce artifacts for:
+- [x] GitHub Actions workflow to build and produce artifacts for:
       `i686`/`x86`, `x86_64`/`amd64`, `armhf`, `armv7`, `aarch64`

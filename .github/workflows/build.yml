@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  release:
+    types: [published]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y indent
+      - name: Build
+        run: make
+      - name: Test
+        run: make test
+      - name: Style check
+        run: make style && git diff --exit-code
+      - name: Coverage
+        run: make coverage
+
+  build:
+    needs: test
+    if: github.event_name == 'release'
+    strategy:
+      matrix:
+        target:
+          - { name: x86_64, cc: gcc, pkg: gcc }
+          - { name: i686, cc: i686-linux-gnu-gcc, pkg: gcc-i686-linux-gnu }
+          - { name: armhf, cc: arm-linux-gnueabihf-gcc, pkg: gcc-arm-linux-gnueabihf }
+          - { name: armv7, cc: arm-linux-gnueabi-gcc, pkg: gcc-arm-linux-gnueabi }
+          - { name: aarch64, cc: aarch64-linux-gnu-gcc, pkg: gcc-aarch64-linux-gnu }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.target.pkg }}
+      - name: Build daemon
+        run: make CC=${{ matrix.target.cc }} CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -fstack-protector-strong" LDFLAGS="-static -flto"
+      - name: Archive
+        run: |
+          mkdir -p artifacts
+          cp bin/totpgated bin/totpgate artifacts/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: totpgate-${{ matrix.target.name }}
+          path: artifacts/*
