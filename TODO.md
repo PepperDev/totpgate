@@ -11,7 +11,7 @@
 - [ ] Create directory layout: `src/`, `test/`, `bin/`, `obj/`
 - [ ] Verify `musl-gcc` and `indent` are available; document missing tool policy
 - [ ] Create `src/main.c` with CLI option parsing using `getopt_long`:
-      `--control-port` (default 2222), `--port` (default 22),
+      `--port` (default 2222), `--target-port` (default 22),
       `--secret`, `--timeout` (default 30), `--foreground`
 - [ ] Create empty headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
       `encode.h`, `auth.h`, `util.h`
@@ -95,7 +95,7 @@
 ## Client Tool
 
 - [ ] Implement `src/client.c` — sends a single UDP datagram with TOTP
-- [ ] `totpgate --secret <secret> --control-port <port> <server> [target_port]`
+- [ ] `totpgate --secret <secret> --port <port> <server> [target_port]`
 - [ ] Generate TOTP locally using the same `totp.c` code
 - [ ] Parse server address (hostname resolution with `getaddrinfo`)
 - [ ] ≥ 80 % line coverage on `client.c` (excluding `main` that calls `exit`)

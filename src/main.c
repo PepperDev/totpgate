@@ -10,7 +10,7 @@
 #include "auth.h"
 
 struct config {
-    uint16_t control_port;
+    uint16_t port;
     uint16_t target_port;
     unsigned char secret[256];
     size_t secret_len;
@@ -24,8 +24,8 @@ static void print_usage(const char *prog)
         "Usage: %s --secret <secret> [options]\n"
         "\n"
         "Options:\n"
-        "  --control-port <port>   UDP listen port (default: 2222)\n"
-        "  --port <port>           Target TCP port (default: 22)\n"
+        "  --port <port>           UDP listen port (default: 2222)\n"
+        "  --target-port <port>    TCP application port to protect (default: 22)\n"
         "  --secret <secret>       Shared secret\n"
         "                          (base32 by default; prefix with\n"
         "                           hex: or b64: for other encodings)\n"
@@ -38,10 +38,10 @@ static void print_usage(const char *prog)
 static int parse_args(struct config *cfg, int argc, char *argv[])
 {
     static const struct option long_opts[] = {
-        { "control-port", required_argument, NULL, 'c' },
         { "port",         required_argument, NULL, 'p' },
+        { "target-port",  required_argument, NULL, 't' },
         { "secret",       required_argument, NULL, 's' },
-        { "timeout",      required_argument, NULL, 't' },
+        { "timeout",      required_argument, NULL, 'T' },
         { "foreground",   no_argument,       NULL, 'f' },
         { "help",         no_argument,       NULL, 'h' },
         { NULL, 0, NULL, 0 }
@@ -49,21 +49,21 @@ static int parse_args(struct config *cfg, int argc, char *argv[])
     int opt;
     int secret_given = 0;
 
-    while ((opt = getopt_long(argc, argv, "c:p:s:t:fh", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:t:s:T:fh", long_opts, NULL)) != -1) {
         switch (opt) {
-        case 'c': {
-            long val = atol(optarg);
-            if (val < 1 || val > 65535) {
-                fprintf(stderr, "error: --control-port must be 1-65535\n");
-                return -1;
-            }
-            cfg->control_port = (uint16_t)val;
-            break;
-        }
         case 'p': {
             long val = atol(optarg);
             if (val < 1 || val > 65535) {
                 fprintf(stderr, "error: --port must be 1-65535\n");
+                return -1;
+            }
+            cfg->port = (uint16_t)val;
+            break;
+        }
+        case 't': {
+            long val = atol(optarg);
+            if (val < 1 || val > 65535) {
+                fprintf(stderr, "error: --target-port must be 1-65535\n");
                 return -1;
             }
             cfg->target_port = (uint16_t)val;
@@ -80,7 +80,7 @@ static int parse_args(struct config *cfg, int argc, char *argv[])
             secret_given = 1;
             break;
         }
-        case 't': {
+        case 'T': {
             long val = atol(optarg);
             if (val < 1 || val > 86400) {
                 fprintf(stderr, "error: --timeout must be 1-86400\n");
@@ -115,7 +115,7 @@ int main(int argc, char *argv[])
     struct config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.control_port = 2222;
+    cfg.port = 2222;
     cfg.target_port = 22;
     cfg.timeout = 30;
 
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    fprintf(stderr, "control_port=%u\n", cfg.control_port);
+    fprintf(stderr, "port=%u\n", cfg.port);
     fprintf(stderr, "target_port=%u\n", cfg.target_port);
     fprintf(stderr, "secret_len=%zu\n", cfg.secret_len);
     fprintf(stderr, "timeout=%u\n", cfg.timeout);

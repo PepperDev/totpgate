@@ -22,8 +22,8 @@ The daemon `totpgated` accepts:
 
 | Argument | Default | Description |
 |---|---|---|
-| `--control-port` | `2222` | UDP port the daemon listens for TOTP packets |
-| `--port` | `22` | Target TCP port to protect |
+| `--port` | `2222` | UDP port the daemon listens for TOTP packets |
+| `--target-port` | `22` | TCP application port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--timeout` | `30` | Ephemeral rule lifetime in seconds |
 | `--foreground` | off | Log to stderr instead of syslog |
@@ -33,7 +33,7 @@ The client `totpgate` accepts:
 | Argument | Default | Description |
 |---|---|---|
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
-| `--control-port` | `2222` | UDP port of the target daemon |
+| `--port` | `2222` | UDP port of the target daemon |
 | `<server>` | *(required)* | IP or hostname of the daemon |
 | `<target_port>` | — | Override default target port (optional) |
 
@@ -220,7 +220,7 @@ kernel automatically removes them after expiry.
 ```
 START
   │
-  ├─ 1. Parse CLI arguments (--control-port, --port, --secret, --timeout)
+  ├─ 1. Parse CLI arguments (--port, --target-port, --secret, --timeout)
   │      └─ decode secret: detect prefix → base32 / hex / b64 decode → raw bytes
   ├─ 2. Validate & prepare nftables table
   │      ├─ create table "totpgate" if missing
@@ -228,7 +228,7 @@ START
   │      ├─ flush chain (remove stale rules from prior session)
   │      ├─ insert: ct state established,related accept
   │      └─ insert: tcp dport <target> drop
-  ├─ 3. Bind UDP socket to <control_port>
+  ├─ 3. Bind UDP socket to <port>
   ├─ 4. Drop privileges
   │
   └─ LOOP:
