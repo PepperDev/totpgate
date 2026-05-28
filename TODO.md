@@ -16,14 +16,6 @@
 - [ ] ≥ 80 % line coverage on rate-limiting module
 - [ ] Update `DOMAIN.md` with rate-limiting entities and rules
 
-## Client Tool
-
-- [x] Implement `src/client.c` — sends a single UDP datagram with TOTP
-- [x] `totpgate --secret <secret> --port <port> <server> [target_port]`
-- [x] Generate TOTP locally using the same `totp.c` code
-- [x] Parse server address (hostname resolution with `getaddrinfo`)
-- [ ] ≥ 80 % line coverage on `client.c` (excluding `main` that calls `exit`)
-
 ## Documentation
 
 - [x] `README.md` — project overview, build, usage, architecture
@@ -40,6 +32,3 @@
       `epoll_ctl`, `clock_gettime`, `getrandom`, `exit_group`
 - [ ] Configuration file permissions check: warn if world-readable
 - [ ] `epoll` fd limit safety (`maxevents` not exceeding `RLIMIT_NOFILE`)
-- [ ] Reject overlong auth packets (> 256 bytes)
-- [ ] Stack canary test (compile with `-fstack-protector-strong`)
-- [ ] `-D_FORTIFY_SOURCE=2` compile flag

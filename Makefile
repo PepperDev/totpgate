@@ -1,6 +1,7 @@
 CC       ?= musl-gcc
 CFLAGS   ?= -std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto \
-            -MMD -MP -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
+            -MMD -MP -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+            -fstack-protector-strong -D_FORTIFY_SOURCE=2
 LDFLAGS  ?= -static -flto
 LDLIBS   ?=
 
