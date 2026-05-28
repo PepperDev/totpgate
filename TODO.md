@@ -5,12 +5,6 @@
 
 ---
 
-## HMAC-SHA1 Implementation
-
-- [ ] Implement `hmac.c` — HMAC per RFC 2104 with SHA-1
-- [ ] Unit tests: RFC 2202 known test vectors (key <= 64, key > 64, empty key)
-- [ ] ≥ 80 % line coverage on `hmac.c`
-
 ## TOTP Implementation
 
 - [ ] Implement `totp.c` — TOTP per RFC 6238
@@ -70,11 +64,11 @@
 
 ## Documentation
 
-- [ ] `README.md` — project overview, build, usage, architecture
-- [ ] `AGENTS.md` — agent / AI guidelines (this file must be kept current)
-- [ ] `DOMAIN.md` — business rules & entities (this file must be kept current)
-- [ ] `BUG_PREVENTION.md` — recurring bug checklist (populated as bugs are found)
-- [ ] `LICENSE` file (MIT)
+- [x] `README.md` — project overview, build, usage, architecture
+- [x] `AGENTS.md` — agent / AI guidelines (this file must be kept current)
+- [x] `DOMAIN.md` — business rules & entities (this file must be kept current)
+- [x] `BUG_PREVENTION.md` — recurring bug checklist (populated as bugs are found)
+- [x] `LICENSE` file (MIT)
 - [ ] Man pages: `totpgated.1`, `totpgate.1`
 
 ## Hardening & Audit
