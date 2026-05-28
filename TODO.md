@@ -5,35 +5,6 @@
 
 ---
 
-## Netlink Firewall Module
-
-- [ ] Implement `netlink.c` — create/flush/delete nftables table & chain via netlink
-- [ ] `netlink_init()` — create table `totpgate`, chain `input` (hook input, prio 0)
-- [ ] `netlink_flush_chain()` — flush chain at startup (remove stale rules)
-- [ ] `netlink_add_established_rule()` — insert `ct state established,related accept`
-- [ ] `netlink_add_default_drop(target_port)` — insert `tcp dport <port> drop`
-- [ ] `netlink_rule_insert(ip, port, lifetime)` — insert accepting rule with timeout
-- [ ] `netlink_cleanup()` — flush chain and delete table on shutdown
-- [ ] Unit tests with mock netlink socket (stub `sendto`/`recvmsg` returning canned replies)
-- [ ] ≥ 80 % line coverage on `netlink.c`
-
-## UDP Listener
-
-- [ ] Implement `udp.c` — bind, receive, address extraction
-- [ ] `udp_open(port)` — create and bind UDP socket with `O_NONBLOCK`, return fd (caller closes)
-- [ ] `udp_recv(fd, buf, len, addr)` — non-blocking receive with `recvfrom` loop until `EAGAIN`
-- [ ] Handle `EAGAIN` / `EWOULDBLOCK` gracefully (normal termination)
-- [ ] Unit tests with mock socket via socketpair or loopback
-- [ ] ≥ 80 % line coverage on `udp.c`
-
-## Auth Packet Parsing & Anti-Replay
-
-- [ ] `auth_parse(data, len, &token, &port, &lifetime)` — parse `token[:port[:lifetime]]`
-- [ ] `auth_validate(secret, cfg, token, seq, src_ip, now)` — TOTP check + seq check
-- [ ] `auth_seen_before(seq, src_ip)` / `auth_record_seq(seq, src_ip)` — anti-replay table
-- [ ] Unit tests: valid/invalid packets, replay detection, clock drift
-- [ ] ≥ 80 % line coverage on `auth.c`
-
 ## Daemon Main Loop
 
 - [ ] Wire up `main.c`: parse CLI → netlink_init → flush chain → add permanent rules →

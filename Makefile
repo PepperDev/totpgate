@@ -16,16 +16,24 @@ MAIN_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(MAIN_SRCS))
 LIB_OBJS  = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(LIB_SRCS))
 DEPS      = $(OBJS:.o=.d)
 
-TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
-TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(OBJ_DIR)/test_%.o, $(TEST_SRCS))
+#  Test sources — exclude netlink test (has stubs that conflict)
+TEST_SRCS   = $(filter-out $(TEST_DIR)/mock_%.c $(TEST_DIR)/test_netlink.c, \
+                $(wildcard $(TEST_DIR)/*.c))
+TEST_OBJS   = $(patsubst $(TEST_DIR)/%.c, $(OBJ_DIR)/test_%.o, $(TEST_SRCS))
+MOCK_SRCS   = $(wildcard $(TEST_DIR)/mock_*.c)
+MOCK_OBJS   = $(patsubst $(TEST_DIR)/mock_%.c, $(OBJ_DIR)/mock_%.o, $(MOCK_SRCS))
+# Library objects that have a mock counterpart — exclude from test link
+MOCKED_LIBS = $(patsubst $(TEST_DIR)/mock_%.c, $(OBJ_DIR)/%.o, $(MOCK_SRCS))
+TEST_LIB_OBJS = $(filter-out $(MOCKED_LIBS), $(LIB_OBJS))
 
 DAEMON    = $(BIN_DIR)/totpgated
 CLIENT    = $(BIN_DIR)/totpgate
 TEST_BIN  = $(BIN_DIR)/test_runner
+NL_BIN    = $(BIN_DIR)/test_netlink
 
 OBJS      = $(MAIN_OBJS) $(LIB_OBJS)
 
-.PHONY: all daemon client test clean style coverage
+.PHONY: all daemon client test netlink-test clean style coverage
 
 all: daemon client
 
@@ -47,15 +55,23 @@ $(CLIENT): $(OBJ_DIR)/client.o $(filter-out $(OBJ_DIR)/totp.o, $(LIB_OBJS)) | $(
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-#  Test runner — link together test object files + library objects (without main)
+#  Main test runner — link together test object files + library objects (without main)
 $(TEST_BIN): $(TEST_OBJS) $(LIB_OBJS) | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(OBJ_DIR)/test_%.o: $(TEST_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
-test: $(TEST_BIN)
+#  Netlink test — separate binary (defines syscall stubs, links against real netlink.o)
+$(NL_BIN): $(OBJ_DIR)/netlink_test_stubs.o $(OBJ_DIR)/netlink.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+$(OBJ_DIR)/netlink_test_stubs.o: $(TEST_DIR)/test_netlink.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
+test: $(TEST_BIN) $(NL_BIN)
 	./$(TEST_BIN)
+	./$(NL_BIN)
 
 style:
 	indent -linux -120 -i2 -nut $(SRC_DIR)/*.c $(SRC_DIR)/*.h $(TEST_DIR)/*.c $(TEST_DIR)/*.h 2>/dev/null || true
@@ -70,13 +86,20 @@ $(OBJ_DIR)/cov_%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 $(OBJ_DIR)/cov_test_%.o: $(TEST_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
+$(OBJ_DIR)/cov_nl_stubs.o: $(TEST_DIR)/test_netlink.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
 $(BIN_DIR)/test_runner_cov: $(patsubst $(OBJ_DIR)/test_%.o, $(OBJ_DIR)/cov_test_%.o, $(TEST_OBJS)) \
                             $(patsubst $(OBJ_DIR)/%.o, $(OBJ_DIR)/cov_%.o, $(LIB_OBJS)) | $(BIN_DIR)
 	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
 
-coverage: $(BIN_DIR)/test_runner_cov
+$(BIN_DIR)/test_netlink_cov: $(OBJ_DIR)/cov_nl_stubs.o $(OBJ_DIR)/cov_netlink.o | $(BIN_DIR)
+	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
+
+coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov
 	@rm -f $(SRC_DIR)/*.gcda $(SRC_DIR)/*.gcno
 	./$(BIN_DIR)/test_runner_cov
+	./$(BIN_DIR)/test_netlink_cov
 	@echo "=== Line coverage per module ==="
 	@for src in $(LIB_SRCS); do \
 		base=$$(basename $$src .c); \

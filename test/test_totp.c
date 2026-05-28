@@ -62,32 +62,50 @@ static void test_7_digits(void)
 static void test_validate_exact(void)
 {
     int ret = totp_validate(g_secret, sizeof(g_secret),
-                            94287082, 8, 30, 0, 0, 59);
+                            94287082, 8, 30, 0, 0, 59, NULL);
     ASSERT_INT_EQ(ret, 0);
 }
 
-/* Validate with drift: should pass one window ahead */
 static void test_validate_drift_ahead(void)
 {
     int ret = totp_validate(g_secret, sizeof(g_secret),
-                            14050471, 8, 30, 0, 1, 1111111081);
+                            14050471, 8, 30, 0, 1, 1111111081, NULL);
     ASSERT_INT_EQ(ret, 0);
 }
 
-/* Validate with drift: should pass one window behind */
 static void test_validate_drift_behind(void)
 {
     int ret = totp_validate(g_secret, sizeof(g_secret),
-                            94287082, 8, 30, 1, 0, 89);
+                            94287082, 8, 30, 1, 0, 89, NULL);
     ASSERT_INT_EQ(ret, 0);
 }
 
-/* Validate: wrong token should fail */
 static void test_validate_wrong(void)
 {
     int ret = totp_validate(g_secret, sizeof(g_secret),
-                            12345678, 8, 30, 0, 0, 59);
+                            12345678, 8, 30, 0, 0, 59, NULL);
     ASSERT_INT_EQ(ret, -1);
+}
+
+static void test_validate_counter(void)
+{
+    uint64_t counter = 0;
+    int ret = totp_validate(g_secret, sizeof(g_secret),
+                            94287082, 8, 30, 0, 0, 59, &counter);
+    ASSERT_INT_EQ(ret, 0);
+    ASSERT_INT_EQ((int)counter, 1);
+}
+
+static void test_validate_counter_drift(void)
+{
+    uint64_t counter = 0;
+    int ret = totp_validate(g_secret, sizeof(g_secret),
+                            14050471, 8, 30, 0, 1, 1111111081,
+                            &counter);
+    ASSERT_INT_EQ(ret, 0);
+    /* time 1111111081 → current = 1111111081/30 = 37037036,
+       matching token is at d=+1 → counter = 37037037 */
+    ASSERT_INT_EQ((int)counter, 37037037);
 }
 
 TEST_GROUP(totp) {
@@ -103,5 +121,7 @@ TEST_GROUP(totp) {
     TEST(test_validate_drift_ahead),
     TEST(test_validate_drift_behind),
     TEST(test_validate_wrong),
+    TEST(test_validate_counter),
+    TEST(test_validate_counter_drift),
     END_TEST
 };
