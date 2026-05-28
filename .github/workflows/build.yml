@@ -194,7 +194,7 @@ jobs:
           } > "$RPMDIR/SPECS/totpgate.spec"
           cp dist/* "$RPMDIR/SOURCES/"
           HOST_ARCH=$(rpm --eval "%{_arch}" 2>/dev/null || uname -m)
-          rpmbuild -ba --define "_topdir $RPMDIR" "$RPMDIR/SPECS/totpgate.spec"
+          rpmbuild -ba --define "_topdir $RPMDIR" --define "__strip /bin/true" "$RPMDIR/SPECS/totpgate.spec"
           cp "$RPMDIR/RPMS/$HOST_ARCH/totpgate-$VERSION-1.$HOST_ARCH.rpm" \
              "totpgate-$VERSION-1.$RPM_ARCH.rpm"
 
