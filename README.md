@@ -68,12 +68,12 @@ warnings** before the section is considered complete.
 ## Usage
 
 ```sh
-totpgated --control-port 2222 --port 22 --secret "JBSWY3DPEHPK3PXP"
+totpgated --control-port 2222 --port 22 --secret "JBSWY3DPEHPK3PXP" --timeout 30
 totpgate  --secret "hex:48656c6c6f" --control-port 2222 server.example.com
 ```
 
 The daemon listens on UDP `--control-port` for a valid TOTP.  On match the
-sender's IP is allowed to open a TCP connection to `--port` for 30 seconds.
+sender's IP is allowed to open a TCP connection to `--port` for `--timeout` seconds.
 
 When `totpgated` starts it flushes any stale rules from a prior session,
 inserts a permanent `ct state established,related accept` rule, and installs

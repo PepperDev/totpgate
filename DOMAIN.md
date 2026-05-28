@@ -25,6 +25,7 @@ The daemon `totpgated` accepts:
 | `--control-port` | `2222` | UDP port the daemon listens for TOTP packets |
 | `--port` | `22` | Target TCP port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
+| `--timeout` | `30` | Ephemeral rule lifetime in seconds |
 | `--foreground` | off | Log to stderr instead of syslog |
 
 The client `totpgate` accepts:
@@ -123,7 +124,8 @@ Attributes:
 | — | `tcp dport != <target_port>` | `accept` (skip non-target) |
 | — | `tcp dport <target_port>` | `drop` (silent, unmatched SYN) |
 
-**Ephemeral rules** (inserted on successful auth, auto-expire after 30 s):
+**Ephemeral rules** (inserted on successful auth, auto-expire after
+`--timeout` seconds):
 
 | Match | Action |
 |---|---|
@@ -196,7 +198,7 @@ ON  startup:
 ```
 ON  successful authentication:
     insert rule: ip saddr <client_ip> tcp dport <target> ct state new accept
-                  // auto-expires after 30 seconds
+                  // auto-expires after <timeout> seconds
 ```
 
 ### BR-6  Privilege drop
@@ -208,8 +210,8 @@ AFTER  UDP socket is bound (< 1024 requires CAP_NET_BIND_SERVICE):
 
 ### BR-7  Ephemeral rule timeout
 
-All auth-granted rules have a fixed 30-second lifetime.  The kernel
-automatically removes them after expiry.
+Auth-granted rules have a lifetime set by `--timeout` (default 30 s).  The
+kernel automatically removes them after expiry.
 
 ---
 
@@ -218,7 +220,7 @@ automatically removes them after expiry.
 ```
 START
   │
-  ├─ 1. Parse CLI arguments (--control-port, --port, --secret)
+  ├─ 1. Parse CLI arguments (--control-port, --port, --secret, --timeout)
   │      └─ decode secret: detect prefix → base32 / hex / b64 decode → raw bytes
   ├─ 2. Validate & prepare nftables table
   │      ├─ create table "totpgate" if missing
@@ -234,7 +236,7 @@ START
        ├─ 6. Parse auth_packet
        ├─ 7. Validate TOTP
        ├─ 8. Check anti-replay seq counter
-       ├─ 9. Insert nftables rule (30s timeout)
+       ├─ 9. Insert nftables rule (--timeout seconds)
        ├─10. Log success / failure
        └─11. Prune expired auth session records
 ```

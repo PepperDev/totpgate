@@ -11,7 +11,8 @@
 - [ ] Create directory layout: `src/`, `test/`, `bin/`, `obj/`
 - [ ] Verify `musl-gcc` and `indent` are available; document missing tool policy
 - [ ] Create `src/main.c` with CLI option parsing using `getopt_long`:
-      `--control-port` (default 2222), `--port` (default 22), `--secret`, `--foreground`
+      `--control-port` (default 2222), `--port` (default 22),
+      `--secret`, `--timeout` (default 30), `--foreground`
 - [ ] Create empty headers: `sha1.h`, `hmac.h`, `totp.h`, `netlink.h`, `udp.h`,
       `encode.h`, `auth.h`, `util.h`
 - [ ] Create `test/test_runner.h` with minimal test macros (ASSERT_INT_EQ, ASSERT_STREQ, etc.)
@@ -58,7 +59,7 @@
 - [ ] `netlink_flush_chain()` — flush chain at startup (remove stale rules)
 - [ ] `netlink_add_established_rule()` — insert `ct state established,related accept`
 - [ ] `netlink_add_default_drop(target_port)` — insert `tcp dport <port> drop`
-- [ ] `netlink_rule_insert(ip, port, lifetime)` — insert accepting rule with 30s timeout
+- [ ] `netlink_rule_insert(ip, port, lifetime)` — insert accepting rule with timeout
 - [ ] `netlink_cleanup()` — flush chain and delete table on shutdown
 - [ ] Unit tests with mock netlink socket (stub `sendto`/`recvmsg` returning canned replies)
 - [ ] ≥ 80 % line coverage on `netlink.c`
