@@ -1,7 +1,31 @@
 #include "test_runner.h"
 
+/* test groups */
+extern const test_case_t encode_tests[];
+
+static const test_group_t all_groups[] = {
+    { "encode", encode_tests },
+};
+
 int main(void)
 {
-    printf("No tests yet.\n");
-    return 0;
+    int passed = 0;
+    int failed = 0;
+    int gi;
+
+    for (gi = 0; gi < (int)(sizeof(all_groups) / sizeof(all_groups[0])); gi++) {
+        const test_group_t *g = &all_groups[gi];
+        int ti;
+
+        printf("%s:\n", g->name);
+        for (ti = 0; g->tests[ti].fn != NULL; ti++) {
+            printf("  %s ... ", g->tests[ti].name);
+            g->tests[ti].fn();
+            printf("OK\n");
+            passed++;
+        }
+    }
+
+    printf("\n%d passed, %d failed\n", passed, failed);
+    return failed;
 }

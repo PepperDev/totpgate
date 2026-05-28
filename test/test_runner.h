@@ -5,6 +5,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef void (*test_fn)(void);
+
+typedef struct {
+    const char *name;
+    test_fn fn;
+} test_case_t;
+
+typedef struct {
+    const char *name;
+    const test_case_t *tests;
+} test_group_t;
+
+/* groups are termined by { NULL, NULL } sentinel */
+
+#define TEST(name) { #name, name }
+
+#define END_TEST { NULL, NULL }
+
+#define TEST_GROUP(name) \
+    const test_case_t name##_tests[] =
+
 #define ASSERT_INT_EQ(a, b) \
     do { \
         int _a = (a); \

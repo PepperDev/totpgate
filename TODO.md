@@ -23,16 +23,6 @@
 > `cc` (gcc).  Install `musl-gcc` for production static builds.  `indent` is
 > available.
 
-## Encoding Utilities
-
-- [ ] Implement `encode.c` — base32 decode (RFC 4648)
-- [ ] Implement `encode.c` — hex decode (accept both cases, odd-length)
-- [ ] Implement `encode.c` — base64 decode (RFC 4648 standard alphabet)
-- [ ] `secret_decode(input, &out, &out_len, &err)` — detect prefix, dispatch
-      to correct decoder, return raw bytes
-- [ ] Unit tests: known decode vectors, invalid chars, padding errors, empty input
-- [ ] ≥ 80 % line coverage on `encode.c`
-
 ## SHA-1 Implementation
 
 - [ ] Implement `sha1.c` — SHA-1 hash per RFC 3174
