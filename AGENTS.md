@@ -138,8 +138,8 @@ performs better under heavy workload.  Key principles:
   - `BUG_PREVENTION.md` has been reviewed for applicable items.
 - When **all** tasks in a section are done, **delete the entire section** from
   `TODO.md`.
-- **Before every commit**: review `TODO.md` and ensure completed sections
-  have been removed and remaining items are accurate.
+- **Before every commit**: run `make style` and review `TODO.md` to ensure
+  completed sections have been removed and remaining items are accurate.
 
 ---
 

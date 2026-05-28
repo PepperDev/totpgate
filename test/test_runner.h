@@ -8,13 +8,13 @@
 typedef void (*test_fn)(void);
 
 typedef struct {
-    const char *name;
-    test_fn fn;
+  const char *name;
+  test_fn fn;
 } test_case_t;
 
 typedef struct {
-    const char *name;
-    const test_case_t *tests;
+  const char *name;
+  const test_case_t *tests;
 } test_group_t;
 
 /* groups are termined by { NULL, NULL } sentinel */

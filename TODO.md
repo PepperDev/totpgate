@@ -5,23 +5,23 @@
 
 ---
 
-## Daemon Main Loop
+## Auth Failure Rate Limiting
 
-- [ ] Wire up `main.c`: parse CLI → netlink_init → flush chain → add permanent rules →
-      UDP bind → privilege drop → epoll loop
-- [ ] Signal handling: `SIGTERM`, `SIGINT` → graceful shutdown (cleanup rules, close sockets)
-- [ ] Logging: `LOG_ERR`, `LOG_WARNING`, `LOG_INFO`, `LOG_DEBUG` via `syslog` (or `stderr` in foreground)
-- [ ] `--foreground` flag: log to stderr instead of syslog
-- [ ] Epoll loop: `epoll_wait()` (edge-triggered) on UDP socket, process all ready fds per call
-- [ ] Session pruning: remove expired entries from session table during idle epoll cycles
-- [ ] ≥ 80 % line coverage on `main.c` (excluding option parsing that calls `exit`)
+- [ ] Track per-source-IP failure count with timestamps
+- [ ] On repeated failures: block IP for `--min-block` (default: 5 min)
+- [ ] Exponential backoff: double block duration per repeat (min → 2× → 4× → … → `--max-block`)
+- [ ] CLI args: `--min-block <seconds>` (default 300), `--max-block <seconds>` (default 86400),
+      `--rate-limit <failures/window>` (default 5/60s)
+- [ ] After cooldown expires: re-allow the IP (clear failure count)
+- [ ] ≥ 80 % line coverage on rate-limiting module
+- [ ] Update `DOMAIN.md` with rate-limiting entities and rules
 
 ## Client Tool
 
-- [ ] Implement `src/client.c` — sends a single UDP datagram with TOTP
-- [ ] `totpgate --secret <secret> --port <port> <server> [target_port]`
-- [ ] Generate TOTP locally using the same `totp.c` code
-- [ ] Parse server address (hostname resolution with `getaddrinfo`)
+- [x] Implement `src/client.c` — sends a single UDP datagram with TOTP
+- [x] `totpgate --secret <secret> --port <port> <server> [target_port]`
+- [x] Generate TOTP locally using the same `totp.c` code
+- [x] Parse server address (hostname resolution with `getaddrinfo`)
 - [ ] ≥ 80 % line coverage on `client.c` (excluding `main` that calls `exit`)
 
 ## Documentation

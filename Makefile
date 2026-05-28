@@ -17,8 +17,9 @@ LIB_OBJS  = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(LIB_SRCS))
 DEPS      = $(OBJS:.o=.d)
 
 #  Test sources — exclude netlink test (has stubs that conflict)
-TEST_SRCS   = $(filter-out $(TEST_DIR)/mock_%.c $(TEST_DIR)/test_netlink.c, \
-                $(wildcard $(TEST_DIR)/*.c))
+#  and daemon test (needs separate binary with mocks + main_core.o)
+TEST_SRCS   = $(filter-out $(TEST_DIR)/mock_%.c $(TEST_DIR)/test_netlink.c \
+                $(TEST_DIR)/test_daemon.c, $(wildcard $(TEST_DIR)/*.c))
 TEST_OBJS   = $(patsubst $(TEST_DIR)/%.c, $(OBJ_DIR)/test_%.o, $(TEST_SRCS))
 MOCK_SRCS   = $(wildcard $(TEST_DIR)/mock_*.c)
 MOCK_OBJS   = $(patsubst $(TEST_DIR)/mock_%.c, $(OBJ_DIR)/mock_%.o, $(MOCK_SRCS))
@@ -30,10 +31,11 @@ DAEMON    = $(BIN_DIR)/totpgated
 CLIENT    = $(BIN_DIR)/totpgate
 TEST_BIN  = $(BIN_DIR)/test_runner
 NL_BIN    = $(BIN_DIR)/test_netlink
+DAEMON_TEST_BIN = $(BIN_DIR)/test_daemon
 
 OBJS      = $(MAIN_OBJS) $(LIB_OBJS)
 
-.PHONY: all daemon client test netlink-test clean style coverage
+.PHONY: all daemon client test daemon-test netlink-test clean style coverage
 
 all: daemon client
 
@@ -49,7 +51,7 @@ $(DAEMON): $(OBJ_DIR)/main.o $(LIB_OBJS) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 #  Client
-$(CLIENT): $(OBJ_DIR)/client.o $(filter-out $(OBJ_DIR)/totp.o, $(LIB_OBJS)) | $(BIN_DIR)
+$(CLIENT): $(OBJ_DIR)/client.o $(LIB_OBJS) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
@@ -62,6 +64,22 @@ $(TEST_BIN): $(TEST_OBJS) $(LIB_OBJS) | $(BIN_DIR)
 $(OBJ_DIR)/test_%.o: $(TEST_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
+#  Daemon test object — explicit rule (pattern test_%.o → test/%.c doesn't match)
+$(OBJ_DIR)/test_daemon.o: $(TEST_DIR)/test_daemon.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -DBUILD_DAEMON_TEST_MAIN -c -o $@ $<
+
+#  Daemon core object — compiled without main() for test linking
+$(OBJ_DIR)/main_core.o: $(SRC_DIR)/main.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -DDAEMON_CORE_ONLY -c -o $@ $<
+
+#  Mock objects — replace real implementations at link time
+$(OBJ_DIR)/mock_%.o: $(TEST_DIR)/mock_%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
+#  Daemon test binary — links main_core.o + mocks + library objects
+$(DAEMON_TEST_BIN): $(OBJ_DIR)/test_daemon.o $(OBJ_DIR)/main_core.o $(MOCK_OBJS) $(TEST_LIB_OBJS) | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
 #  Netlink test — separate binary (defines syscall stubs, links against real netlink.o)
 $(NL_BIN): $(OBJ_DIR)/netlink_test_stubs.o $(OBJ_DIR)/netlink.o | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
@@ -69,12 +87,14 @@ $(NL_BIN): $(OBJ_DIR)/netlink_test_stubs.o $(OBJ_DIR)/netlink.o | $(BIN_DIR)
 $(OBJ_DIR)/netlink_test_stubs.o: $(TEST_DIR)/test_netlink.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
-test: $(TEST_BIN) $(NL_BIN)
+test: $(TEST_BIN) $(NL_BIN) $(DAEMON_TEST_BIN)
 	./$(TEST_BIN)
 	./$(NL_BIN)
+	./$(DAEMON_TEST_BIN)
 
 style:
-	indent -linux -120 -i2 -nut $(SRC_DIR)/*.c $(SRC_DIR)/*.h $(TEST_DIR)/*.c $(TEST_DIR)/*.h 2>/dev/null || true
+	indent -linux -l120 -i2 -nut $(SRC_DIR)/*.c $(SRC_DIR)/*.h $(TEST_DIR)/*.c $(TEST_DIR)/*.h 2>/dev/null || true
+	find $(SRC_DIR) $(TEST_DIR) -name '*~' -delete
 
 COVERAGE_DIR = $(OBJ_DIR)/coverage
 COVERAGE_CFLAGS = -fprofile-arcs -ftest-coverage -O0 -g
@@ -89,6 +109,16 @@ $(OBJ_DIR)/cov_test_%.o: $(TEST_DIR)/%.c | $(OBJ_DIR)
 $(OBJ_DIR)/cov_nl_stubs.o: $(TEST_DIR)/test_netlink.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
+#  Daemon test coverage object — explicit rule for test_daemon.c
+$(OBJ_DIR)/cov_test_daemon.o: $(TEST_DIR)/test_daemon.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -DBUILD_DAEMON_TEST_MAIN -c -o $@ $<
+
+$(OBJ_DIR)/cov_main_core.o: $(SRC_DIR)/main.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -DDAEMON_CORE_ONLY -c -o $@ $<
+
+$(OBJ_DIR)/cov_mock_%.o: $(TEST_DIR)/mock_%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_CFLAGS) -I$(SRC_DIR) -c -o $@ $<
+
 $(BIN_DIR)/test_runner_cov: $(patsubst $(OBJ_DIR)/test_%.o, $(OBJ_DIR)/cov_test_%.o, $(TEST_OBJS)) \
                             $(patsubst $(OBJ_DIR)/%.o, $(OBJ_DIR)/cov_%.o, $(LIB_OBJS)) | $(BIN_DIR)
 	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
@@ -96,10 +126,16 @@ $(BIN_DIR)/test_runner_cov: $(patsubst $(OBJ_DIR)/test_%.o, $(OBJ_DIR)/cov_test_
 $(BIN_DIR)/test_netlink_cov: $(OBJ_DIR)/cov_nl_stubs.o $(OBJ_DIR)/cov_netlink.o | $(BIN_DIR)
 	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
 
-coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov
+$(BIN_DIR)/test_daemon_cov: $(OBJ_DIR)/cov_test_daemon.o $(OBJ_DIR)/cov_main_core.o \
+                             $(patsubst $(OBJ_DIR)/mock_%.o, $(OBJ_DIR)/cov_mock_%.o, $(MOCK_OBJS)) \
+                             $(patsubst $(OBJ_DIR)/%.o, $(OBJ_DIR)/cov_%.o, $(TEST_LIB_OBJS)) | $(BIN_DIR)
+	$(CC) $(COVERAGE_LDFLAGS) -o $@ $^ $(LDLIBS)
+
+coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov $(BIN_DIR)/test_daemon_cov
 	@rm -f $(SRC_DIR)/*.gcda $(SRC_DIR)/*.gcno
 	./$(BIN_DIR)/test_runner_cov
 	./$(BIN_DIR)/test_netlink_cov
+	./$(BIN_DIR)/test_daemon_cov
 	@echo "=== Line coverage per module ==="
 	@for src in $(LIB_SRCS); do \
 		base=$$(basename $$src .c); \
@@ -107,7 +143,7 @@ coverage: $(BIN_DIR)/test_runner_cov $(BIN_DIR)/test_netlink_cov
 			gcov -n "$(OBJ_DIR)/cov_$${base}" 2>/dev/null | head -5; \
 		fi; \
 	done
-	@gcov -n $(OBJ_DIR)/cov_main 2>/dev/null | head -5 || true
+	@gcov -n $(OBJ_DIR)/cov_main_core 2>/dev/null | head -5 || true
 	@rm -f $(SRC_DIR)/*.gcda $(SRC_DIR)/*.gcno
 
 $(OBJ_DIR) $(BIN_DIR):
