@@ -149,7 +149,7 @@ static void test_add_established_ok(void)
   int ret;
 
   set_recv_ack();
-  ret = netlink_add_established_rule();
+  ret = netlink_add_established_rule(NULL);
   ASSERT_INT_EQ(ret, 0);
 }
 
@@ -159,7 +159,7 @@ static void test_add_default_drop_ok(void)
 
   /* echo mode so handle gets parsed */
   set_recv_echo(42);
-  ret = netlink_add_default_drop(22);
+  ret = netlink_add_default_drop(22, NULL);
   ASSERT_INT_EQ(ret, 0);
 }
 
@@ -168,7 +168,7 @@ static void test_rule_insert_ok(void)
   uint64_t h;
 
   set_recv_echo(99);
-  h = netlink_rule_insert(0xc0a80101, 22);
+  h = netlink_rule_insert(0xc0a80101, 22, NULL);
   ASSERT_TRUE(h != 0);
   ASSERT_INT_EQ((int)h, 99);
 }

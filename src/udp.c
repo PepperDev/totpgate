@@ -6,14 +6,13 @@
 #include <errno.h>
 #include <string.h>
 
-int udp_open(uint16_t port)
+int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
 {
   int fd;
   int ret;
   int flags;
-  struct sockaddr_in addr;
 
-  fd = socket(AF_INET, SOCK_DGRAM, 0);
+  fd = socket(addr->ss_family, SOCK_DGRAM, 0);
   if (fd < 0)
     return -1;
 
@@ -28,12 +27,7 @@ int udp_open(uint16_t port)
     return -1;
   }
 
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(port);
-
-  ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+  ret = bind(fd, (struct sockaddr *)addr, addrlen);
   if (ret < 0) {
     close(fd);
     return -1;

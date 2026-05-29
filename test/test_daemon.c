@@ -13,15 +13,25 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#define MAX_PORTS 8
+#define IFNAMSIZ 16
+
 /* struct definitions matching main.c */
+struct listen_addr {
+  struct sockaddr_storage addr;
+  socklen_t addrlen;
+};
+
 struct config {
-  uint16_t port;
+  struct listen_addr ports[MAX_PORTS];
+  int num_ports;
   uint16_t target_port;
   unsigned char secret[256];
   size_t secret_len;
   uint32_t timeout;
   char user[32];
   char group[32];
+  char iface[IFNAMSIZ];
   char secret_file[4096];
   int foreground;
   int test_mode;
@@ -30,15 +40,37 @@ struct config {
 
 struct daemon {
   struct config *cfg;
-  int udp_fd;
+  int udp_fds[MAX_PORTS];
+  int num_udp_fds;
   int epoll_fd;
   int signal_fd;
   int maxevents;
   time_t last_prune;
 };
 
-/* declare daemon functions from main.c */
+/* helpers for listen_addr manipulation */
+static void set_cfg_port(struct config *cfg, uint16_t port)
+{
+  struct sockaddr_in *in = (struct sockaddr_in *)&cfg->ports[0].addr;
 
+  memset(in, 0, sizeof(*in));
+  in->sin_family = AF_INET;
+  in->sin_port = htons(port);
+  in->sin_addr.s_addr = htonl(INADDR_ANY);
+  cfg->ports[0].addrlen = sizeof(*in);
+  cfg->num_ports = 1;
+}
+
+static uint16_t port_from_listen_addr(const struct listen_addr *la)
+{
+  if (la->addr.ss_family == AF_INET) {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)&la->addr;
+    return ntohs(in->sin_port);
+  }
+  return 0;
+}
+
+/* declare daemon functions from main.c */
 int daemon_setup(struct daemon *d, struct config *cfg);
 int daemon_process(struct daemon *d);
 void daemon_cleanup(struct daemon *d);
@@ -53,16 +85,17 @@ extern int g_nl_flush_ret;
 extern int g_nl_est_ret;
 extern int g_nl_drop_ret;
 extern uint16_t g_nl_drop_port;
+extern char g_nl_drop_iface[16];
 extern int g_nl_cleanup_called;
 extern uint64_t g_nl_insert_return;
 extern uint32_t g_nl_insert_ip;
+extern char g_nl_insert_iface[16];
 extern int g_udp_open_ret;
 extern uint16_t g_udp_open_port;
 extern unsigned char g_udp_recv_buf[256];
 extern size_t g_udp_recv_len;
 extern uint32_t g_udp_recv_src_ip;
 extern uint16_t g_udp_recv_src_port;
-
 extern int g_udp_recv_done;
 
 extern void mock_netlink_reset(void);
@@ -76,14 +109,14 @@ static void test_parse_minimal(void)
   char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP", NULL };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
   optind = 0;
   int ret = parse_args(&cfg, 3, argv);
   ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)cfg.port, 2222);
+  ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 2222);
+  ASSERT_INT_EQ(cfg.num_ports, 1);
   ASSERT_INT_EQ((int)cfg.target_port, 22);
   ASSERT_INT_EQ((int)cfg.timeout, 30);
   ASSERT_INT_EQ(cfg.foreground, 0);
@@ -99,14 +132,14 @@ static void test_parse_all_options(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
   optind = 0;
   int ret = parse_args(&cfg, 10, argv);
   ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)cfg.port, 9999);
+  ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 9999);
+  ASSERT_INT_EQ(cfg.num_ports, 1);
   ASSERT_INT_EQ((int)cfg.target_port, 443);
   ASSERT_INT_EQ((int)cfg.timeout, 120);
   ASSERT_INT_EQ(cfg.foreground, 1);
@@ -119,7 +152,6 @@ static void test_parse_missing_secret(void)
   char *argv[] = { "totpgated", NULL };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -136,7 +168,6 @@ static void test_parse_bad_port(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -153,7 +184,6 @@ static void test_parse_bad_target_port(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -170,7 +200,6 @@ static void test_parse_bad_timeout(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -185,7 +214,6 @@ static void test_parse_invalid_secret(void)
   char *argv[] = { "totpgated", "--secret", "hex:ZZZZ", NULL };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -202,7 +230,6 @@ static void test_parse_unknown_option(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -210,8 +237,6 @@ static void test_parse_unknown_option(void)
   int ret = parse_args(&cfg, 4, argv);
   ASSERT_INT_EQ(ret, -1);
 }
-
-/* ---- daemon_setup tests ---- */
 
 static void test_parse_min_block(void)
 {
@@ -221,7 +246,6 @@ static void test_parse_min_block(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -239,7 +263,6 @@ static void test_parse_min_block_bad(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -256,7 +279,6 @@ static void test_parse_max_block(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -274,7 +296,6 @@ static void test_parse_rate_limit(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -293,7 +314,6 @@ static void test_parse_rate_limit_bad(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -310,7 +330,6 @@ static void test_parse_user(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -328,7 +347,6 @@ static void test_parse_group(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -341,10 +359,11 @@ static void test_parse_group(void)
 static void test_parse_secret_file(void)
 {
   struct config cfg;
-  char *argv[] = { "totpgated", "--secret-file", "/etc/totpgated.key", NULL };
+  char *argv[] = { "totpgated", "--secret-file", "/etc/totpgated.key",
+    NULL
+  };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -367,7 +386,6 @@ static void test_parse_secret_file_too_long(void)
   argv[2] = longpath;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -383,7 +401,6 @@ static void test_parse_secret_mutual_exclusive(void)
   };
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -398,7 +415,6 @@ static void test_read_secret_file_ok(void)
   FILE *f;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
 
@@ -430,14 +446,15 @@ static void test_setup_success(void)
   mock_udp_reset();
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
 
   int ret = daemon_setup(&d, &cfg);
   ASSERT_INT_EQ(ret, 0);
-  ASSERT_TRUE(d.udp_fd >= 0);
+  ASSERT_TRUE(d.udp_fds[0] >= 0);
+  ASSERT_INT_EQ(d.num_udp_fds, 1);
   ASSERT_TRUE(d.epoll_fd >= 0);
   ASSERT_TRUE(d.signal_fd >= 0);
   ASSERT_INT_EQ((int)g_udp_open_port, 2222);
@@ -455,7 +472,7 @@ static void test_setup_netlink_init_fail(void)
   g_nl_init_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -474,7 +491,7 @@ static void test_setup_netlink_est_fail(void)
   g_nl_est_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -493,7 +510,7 @@ static void test_setup_netlink_drop_fail(void)
   g_nl_drop_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -512,7 +529,7 @@ static void test_setup_udp_open_fail(void)
   g_udp_open_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -531,14 +548,14 @@ static void test_setup_flush_fail(void)
   g_nl_flush_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
 
   int ret = daemon_setup(&d, &cfg);
   ASSERT_INT_EQ(ret, 0);
-  ASSERT_TRUE(d.udp_fd >= 0);
+  ASSERT_TRUE(d.udp_fds[0] >= 0);
 
   daemon_cleanup(&d);
 }
@@ -552,7 +569,7 @@ static void test_setup_foreground_off(void)
   mock_udp_reset();
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 0;
@@ -575,7 +592,7 @@ static void test_daemon_run_test_mode(void)
   rate_limit_reset();
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -599,7 +616,7 @@ static void test_daemon_run_setup_fail(void)
   g_nl_init_ret = -1;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -631,7 +648,7 @@ static void test_daemon_process_packet(void)
   }
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
+  set_cfg_port(&cfg, 2222);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -691,7 +708,7 @@ static void test_daemon_malformed_packet(void)
   }
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2223;
+  set_cfg_port(&cfg, 2223);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -744,7 +761,7 @@ static void test_daemon_truncated_packet(void)
   }
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2224;
+  set_cfg_port(&cfg, 2224);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -817,7 +834,7 @@ static void test_daemon_rate_limit_block(void)
   }
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2225;
+  set_cfg_port(&cfg, 2225);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -835,7 +852,6 @@ static void test_daemon_rate_limit_block(void)
   }
 
   /* after 5 failures, the 6th should be rate limited (blocked) */
-  /* the g_udp_recv data doesn't matter — rate_limit_check should reject it */
   g_udp_recv_done = 0;
   {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -874,7 +890,7 @@ static void test_daemon_rate_limit_success_clears(void)
   }
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2226;
+  set_cfg_port(&cfg, 2226);
   cfg.target_port = 22;
   cfg.secret_len = 20;
   cfg.foreground = 1;
@@ -945,6 +961,140 @@ static void test_prune_fresh_kept(void)
   ASSERT_INT_EQ(auth_seen_before(100, 0x03030303), -1);
 }
 
+/* ---- parse_args --interface tests ---- */
+
+static void test_parse_interface(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--interface", "eth0", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  int ret = parse_args(&cfg, 5, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_STREQ(cfg.iface, "eth0");
+}
+
+static void test_parse_interface_too_long(void)
+{
+  struct config cfg;
+  char longname[IFNAMSIZ + 10];
+  char *argv[5];
+
+  memset(longname, 'x', sizeof(longname) - 1);
+  longname[sizeof(longname) - 1] = '\0';
+  argv[0] = "totpgated";
+  argv[1] = "--secret";
+  argv[2] = "JBSWY3DPEHPK3PXP";
+  argv[3] = "--interface";
+  argv[4] = longname;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+}
+
+static void test_parse_port_with_ipv4(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--port", "192.168.1.1:2222", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), 0);
+  ASSERT_TRUE(cfg.num_ports == 1);
+  ASSERT_TRUE(cfg.ports[0].addr.ss_family == AF_INET);
+}
+
+static void test_parse_port_with_ipv6(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--port", "[::1]:2222", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), 0);
+  ASSERT_TRUE(cfg.num_ports == 1);
+  ASSERT_TRUE(cfg.ports[0].addr.ss_family == AF_INET6);
+}
+
+static void test_parse_too_many_ports(void)
+{
+  struct config cfg;
+  int argc = 3 + 2 * (MAX_PORTS + 1);
+  char *argv[32];
+  int i;
+
+  argv[0] = "totpgated";
+  argv[1] = "--secret";
+  argv[2] = "JBSWY3DPEHPK3PXP";
+  for (i = 0; i < MAX_PORTS + 1; i++) {
+    char *s = malloc(16);
+    snprintf(s, 16, "%d", 3000 + i);
+    argv[3 + 2 * i] = "--port";
+    argv[4 + 2 * i] = s;
+  }
+  argv[argc] = NULL;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, argc, argv), -1);
+
+  for (i = 0; i < MAX_PORTS + 1; i++)
+    free(argv[4 + 2 * i]);
+}
+
+static void test_parse_bad_ip_port(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--port", "notavalid:port", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+}
+
+static void test_parse_port_ip_hostname_getaddrinfo_err(void)
+{
+  struct config cfg;
+  char *argv[] = { "totpgated", "--secret", "JBSWY3DPEHPK3PXP",
+    "--port", "bogus_!!hostname:2222", NULL
+  };
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.target_port = 22;
+  cfg.timeout = 30;
+
+  optind = 0;
+  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+}
+
 /* ---- test group ---- */
 
 TEST_GROUP(daemon)
@@ -972,10 +1122,16 @@ TEST(test_parse_minimal),
       TEST(test_parse_max_block), TEST(test_parse_rate_limit),
       TEST(test_parse_rate_limit_bad),
       TEST(test_daemon_rate_limit_block),
-      TEST(test_daemon_rate_limit_success_clears), TEST(test_prune_expired), TEST(test_prune_fresh_kept),
+      TEST(test_daemon_rate_limit_success_clears),
+      TEST(test_prune_expired), TEST(test_prune_fresh_kept),
       TEST(test_parse_user), TEST(test_parse_group),
       TEST(test_parse_secret_file), TEST(test_parse_secret_file_too_long),
-      TEST(test_parse_secret_mutual_exclusive), TEST(test_read_secret_file_ok), TEST(test_drop_privs_noop), END_TEST};
+      TEST(test_parse_secret_mutual_exclusive),
+      TEST(test_read_secret_file_ok), TEST(test_drop_privs_noop),
+      TEST(test_parse_interface), TEST(test_parse_interface_too_long),
+      TEST(test_parse_bad_ip_port),
+      TEST(test_parse_port_ip_hostname_getaddrinfo_err),
+      TEST(test_parse_port_with_ipv4), TEST(test_parse_port_with_ipv6), TEST(test_parse_too_many_ports), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)

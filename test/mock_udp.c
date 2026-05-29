@@ -32,23 +32,33 @@ void mock_udp_reset(void)
   g_last_fd = -1;
 }
 
-int udp_open(uint16_t port)
+int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
 {
-  struct sockaddr_in addr;
+  struct sockaddr_in *in;
 
-  g_udp_open_port = port;
-  if (g_udp_open_ret < 0) {
-    return -1;
+  (void)addrlen;
+  if (addr->ss_family != AF_INET) {
+    g_udp_open_port = 0;
+    if (g_udp_open_ret < 0)
+      return -1;
+    g_last_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    if (g_last_fd < 0)
+      return -1;
+    g_udp_open_ret = g_last_fd;
+    return g_last_fd;
   }
+
+  in = (struct sockaddr_in *)addr;
+  g_udp_open_port = ntohs(in->sin_port);
+
+  if (g_udp_open_ret < 0)
+    return -1;
+
   g_last_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
-  if (g_last_fd < 0) {
+  if (g_last_fd < 0)
     return -1;
-  }
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(port);
-  bind(g_last_fd, (struct sockaddr *)&addr, sizeof(addr));
+
+  bind(g_last_fd, (struct sockaddr *)addr, addrlen);
   g_udp_open_ret = g_last_fd;
   return g_last_fd;
 }

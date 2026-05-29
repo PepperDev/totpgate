@@ -8,6 +8,16 @@
 
 static int g_occupy_fd = -1;
 
+static void make_addr(struct sockaddr_storage *ss, uint16_t port)
+{
+  struct sockaddr_in *in = (struct sockaddr_in *)ss;
+
+  memset(in, 0, sizeof(*in));
+  in->sin_family = AF_INET;
+  in->sin_port = htons(port);
+  in->sin_addr.s_addr = htonl(INADDR_ANY);
+}
+
 static void setup_occupy(void)
 {
   if (g_occupy_fd >= 0)
@@ -33,14 +43,20 @@ static void teardown_occupy(void)
 
 static void test_open_success(void)
 {
-  int fd = udp_open(22222);
+  struct sockaddr_storage addr;
+
+  make_addr(&addr, 22222);
+  int fd = udp_open(&addr, sizeof(addr));
   ASSERT_TRUE(fd >= 0);
   close(fd);
 }
 
 static void test_open_and_recv(void)
 {
-  int fd = udp_open(22222);
+  struct sockaddr_storage addr;
+
+  make_addr(&addr, 22222);
+  int fd = udp_open(&addr, sizeof(addr));
   ASSERT_TRUE(fd >= 0);
 
   int snd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -75,15 +91,21 @@ static void test_open_and_recv(void)
 
 static void test_open_bind_fail(void)
 {
+  struct sockaddr_storage addr;
+
   setup_occupy();
-  int fd = udp_open(22999);
+  make_addr(&addr, 22999);
+  int fd = udp_open(&addr, sizeof(addr));
   ASSERT_INT_EQ(fd, -1);
   teardown_occupy();
 }
 
 static void test_recv_small_buf(void)
 {
-  int fd = udp_open(22224);
+  struct sockaddr_storage addr;
+
+  make_addr(&addr, 22224);
+  int fd = udp_open(&addr, sizeof(addr));
   ASSERT_TRUE(fd >= 0);
 
   int snd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -113,9 +135,22 @@ static void test_recv_small_buf(void)
   close(fd);
 }
 
+static void test_open_socket_fail(void)
+{
+  struct sockaddr_storage addr;
+
+  memset(&addr, 0, sizeof(addr));
+  addr.ss_family = AF_UNSPEC;
+  int fd = udp_open(&addr, sizeof(addr));
+  ASSERT_INT_EQ(fd, -1);
+}
+
 static void test_null_ptrs(void)
 {
-  int fd = udp_open(22225);
+  struct sockaddr_storage addr;
+
+  make_addr(&addr, 22225);
+  int fd = udp_open(&addr, sizeof(addr));
   ASSERT_TRUE(fd >= 0);
 
   int snd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -144,4 +179,5 @@ static void test_null_ptrs(void)
 TEST_GROUP(udp)
 {
 TEST(test_open_success),
-      TEST(test_open_and_recv), TEST(test_open_bind_fail), TEST(test_recv_small_buf), TEST(test_null_ptrs), END_TEST};
+      TEST(test_open_and_recv), TEST(test_open_bind_fail),
+      TEST(test_recv_small_buf), TEST(test_null_ptrs), TEST(test_open_socket_fail), END_TEST};

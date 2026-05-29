@@ -12,6 +12,10 @@
 #include <sys/signalfd.h>
 #include <syslog.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <net/if.h>
 #include <fcntl.h>
 #include "encode.h"
 #include "privdrop.h"
@@ -28,15 +32,23 @@
 #define EPOLL_MAXEVENTS 64
 #define PRUNE_INTERVAL 5
 #define SECRET_FILE_MAX 4096
+#define MAX_PORTS 8
+
+struct listen_addr {
+  struct sockaddr_storage addr;
+  socklen_t addrlen;
+};
 
 struct config {
-  uint16_t port;
+  struct listen_addr ports[MAX_PORTS];
+  int num_ports;
   uint16_t target_port;
   unsigned char secret[256];
   size_t secret_len;
   uint32_t timeout;
   char user[32];
   char group[32];
+  char iface[IFNAMSIZ];
   char secret_file[SECRET_FILE_MAX];
   int foreground;
   int test_mode;
@@ -45,12 +57,79 @@ struct config {
 
 struct daemon {
   struct config *cfg;
-  int udp_fd;
+  int udp_fds[MAX_PORTS];
+  int num_udp_fds;
   int epoll_fd;
   int signal_fd;
   int maxevents;
   time_t last_prune;
 };
+
+static int parse_listen_addr(const char *s, struct listen_addr *la)
+{
+  char node[256];
+  const char *port_str;
+  struct addrinfo hints, *res;
+  int ret;
+
+  if (s[0] == '[') {
+    const char *close = strchr(s, ']');
+    if (!close || *(close + 1) != ':')
+      return -1;
+    {
+      size_t nlen = (size_t)(close - s - 1);
+      if (nlen >= sizeof(node))
+        return -1;
+      memcpy(node, s + 1, nlen);
+      node[nlen] = '\0';
+    }
+    port_str = close + 2;
+  } else {
+    const char *colon = strrchr(s, ':');
+    if (colon) {
+      size_t nlen = (size_t)(colon - s);
+      if (nlen >= sizeof(node))
+        return -1;
+      memcpy(node, s, nlen);
+      node[nlen] = '\0';
+      port_str = colon + 1;
+    } else {
+      node[0] = '\0';
+      port_str = s;
+    }
+  }
+
+  {
+    long val = atol(port_str);
+    if (val < 1 || val > 65535)
+      return -1;
+  }
+
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_DGRAM;
+
+  if (node[0] != '\0') {
+    hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+    hints.ai_family = AF_UNSPEC;
+  } else {
+    hints.ai_flags = AI_PASSIVE;
+    hints.ai_family = AF_INET;
+  }
+
+  ret = getaddrinfo(node[0] ? node : NULL, port_str, &hints, &res);
+  if (ret != 0)
+    return -1;
+
+  if ((size_t)res->ai_addrlen > sizeof(la->addr)) {
+    freeaddrinfo(res);
+    return -1;
+  }
+
+  memcpy(&la->addr, res->ai_addr, res->ai_addrlen);
+  la->addrlen = res->ai_addrlen;
+  freeaddrinfo(res);
+  return 0;
+}
 
 static void print_usage(const char *prog)
 {
@@ -58,7 +137,9 @@ static void print_usage(const char *prog)
           "Usage: %s --secret <secret> [options]\n"
           "\n"
           "Options:\n"
-          "  --port <port>           UDP listen port (default: 2222)\n"
+          "  --port <[ip:]port>      UDP listen port (default: 2222)\n"
+          "                          May be given multiple times with optional\n"
+          "                          IP binding (e.g. 0.0.0.0:2222, [::]:2222)\n"
           "  --target-port <port>    TCP application port to protect (default: 22)\n"
           "  --secret <secret>       Shared secret (mutually exclusive with --secret-file)\n"
           "                          (base32 by default; prefix with\n"
@@ -68,6 +149,7 @@ static void print_usage(const char *prog)
           "  --min-block <seconds>   Min rate-limit block duration (default: 300)\n"
           "  --max-block <seconds>   Max rate-limit block duration (default: 86400)\n"
           "  --rate-limit <n/window> Max fails per window (default: 5/60)\n"
+          "  --interface <name>      Network interface to bind firewall rules to\n"
           "  --user <user>           Drop privileges to this user (default: nobody)\n"
           "  --group <group>         Use this group after dropping privs (default: nogroup)\n"
           "  --foreground            Log to stderr instead of syslog\n"
@@ -85,6 +167,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     {"min-block", required_argument, NULL, 'b'},
     {"max-block", required_argument, NULL, 'B'},
     {"rate-limit", required_argument, NULL, 'r'},
+    {"interface", required_argument, NULL, 'i'},
     {"user", required_argument, NULL, 'u'},
     {"group", required_argument, NULL, 'g'},
     {"foreground", no_argument, NULL, 'f'},
@@ -94,15 +177,18 @@ int parse_args(struct config *cfg, int argc, char *argv[])
   int opt;
   int secret_given = 0;
 
-  while ((opt = getopt_long(argc, argv, "p:t:s:S:T:b:B:r:u:g:fh", long_opts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "p:t:s:S:T:b:B:r:i:u:g:fh", long_opts, NULL)) != -1) {
     switch (opt) {
     case 'p':{
-        long val = atol(optarg);
-        if (val < 1 || val > 65535) {
-          fprintf(stderr, "error: --port must be 1-65535\n");
+        if (cfg->num_ports >= MAX_PORTS) {
+          fprintf(stderr, "error: too many --port arguments (max %d)\n", MAX_PORTS);
           return -1;
         }
-        cfg->port = (uint16_t) val;
+        if (parse_listen_addr(optarg, &cfg->ports[cfg->num_ports]) != 0) {
+          fprintf(stderr, "error: invalid --port '%s'\n", optarg);
+          return -1;
+        }
+        cfg->num_ports++;
         break;
       }
     case 't':{
@@ -179,6 +265,15 @@ int parse_args(struct config *cfg, int argc, char *argv[])
         cfg->rate_limit.window = (uint32_t) w;
         break;
       }
+    case 'i':{
+        size_t len = strlen(optarg);
+        if (len >= sizeof(cfg->iface)) {
+          fprintf(stderr, "error: --interface name too long\n");
+          return -1;
+        }
+        memcpy(cfg->iface, optarg, len + 1);
+        break;
+      }
     case 'u':{
         size_t len = strlen(optarg);
         if (len >= sizeof(cfg->user)) {
@@ -213,6 +308,17 @@ int parse_args(struct config *cfg, int argc, char *argv[])
     fprintf(stderr, "error: --secret or --secret-file is required\n");
     print_usage(argv[0]);
     return -1;
+  }
+
+  if (cfg->num_ports == 0) {
+    struct sockaddr_in *in = (struct sockaddr_in *)&cfg->ports[0].addr;
+
+    memset(in, 0, sizeof(*in));
+    in->sin_family = AF_INET;
+    in->sin_port = htons(2222);
+    in->sin_addr.s_addr = htonl(INADDR_ANY);
+    cfg->ports[0].addrlen = sizeof(*in);
+    cfg->num_ports = 1;
   }
 
   return 0;
@@ -284,9 +390,13 @@ int daemon_setup(struct daemon *d, struct config *cfg)
 {
   struct epoll_event ev;
   sigset_t mask;
+  int i;
+  const char *iface;
 
   d->cfg = cfg;
-  d->udp_fd = -1;
+  for (i = 0; i < MAX_PORTS; i++)
+    d->udp_fds[i] = -1;
+  d->num_udp_fds = 0;
   d->epoll_fd = -1;
   d->signal_fd = -1;
   d->last_prune = 0;
@@ -313,21 +423,16 @@ int daemon_setup(struct daemon *d, struct config *cfg)
     log_msg(cfg, LOG_WARNING, "netlink_flush_chain failed");
   }
 
-  if (netlink_add_established_rule() != 0) {
+  iface = cfg->iface[0] ? cfg->iface : NULL;
+
+  if (netlink_add_established_rule(iface) != 0) {
     log_msg(cfg, LOG_ERR, "netlink_add_established_rule failed");
     daemon_cleanup(d);
     return -1;
   }
 
-  if (netlink_add_default_drop(cfg->target_port) != 0) {
+  if (netlink_add_default_drop(cfg->target_port, iface) != 0) {
     log_msg(cfg, LOG_ERR, "netlink_add_default_drop failed");
-    daemon_cleanup(d);
-    return -1;
-  }
-
-  d->udp_fd = udp_open(cfg->port);
-  if (d->udp_fd < 0) {
-    log_msg(cfg, LOG_ERR, "udp_open failed");
     daemon_cleanup(d);
     return -1;
   }
@@ -339,13 +444,23 @@ int daemon_setup(struct daemon *d, struct config *cfg)
     return -1;
   }
 
-  memset(&ev, 0, sizeof(ev));
-  ev.events = EPOLLIN | EPOLLET;
-  ev.data.fd = d->udp_fd;
-  if (epoll_ctl(d->epoll_fd, EPOLL_CTL_ADD, d->udp_fd, &ev) != 0) {
-    log_msg(cfg, LOG_ERR, "epoll_ctl ADD udp failed");
-    daemon_cleanup(d);
-    return -1;
+  for (i = 0; i < cfg->num_ports; i++) {
+    d->udp_fds[i] = udp_open(&cfg->ports[i].addr, cfg->ports[i].addrlen);
+    if (d->udp_fds[i] < 0) {
+      log_msg(cfg, LOG_ERR, "udp_open failed");
+      daemon_cleanup(d);
+      return -1;
+    }
+    d->num_udp_fds = i + 1;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = d->udp_fds[i];
+    if (epoll_ctl(d->epoll_fd, EPOLL_CTL_ADD, d->udp_fds[i], &ev) != 0) {
+      log_msg(cfg, LOG_ERR, "epoll_ctl ADD udp failed");
+      daemon_cleanup(d);
+      return -1;
+    }
   }
 
   sigemptyset(&mask);
@@ -407,56 +522,68 @@ int daemon_process(struct daemon *d)
       return 1;
     }
 
-    if (events[i].data.fd == d->udp_fd) {
-      unsigned char buf[256];
-      uint32_t src_ip;
-      uint16_t src_port;
-      int ret;
-      uint32_t token;
-      uint16_t token_port;
-      uint32_t lifetime;
-      uint16_t target_port;
-      uint64_t rule_handle;
+    {
+      int udp_fd = -1;
+      int j;
 
-      while ((ret = udp_recv(d->udp_fd, buf, sizeof(buf), &src_ip, &src_port)) > 0) {
-        token = 0;
-        token_port = 0;
-        lifetime = 0;
-
-        if (rate_limit_check(src_ip, now) != 0) {
-          log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
-          continue;
+      for (j = 0; j < d->num_udp_fds; j++) {
+        if (events[i].data.fd == d->udp_fds[j]) {
+          udp_fd = d->udp_fds[j];
+          break;
         }
+      }
 
-        if (auth_parse(buf, (size_t)ret, &token, &token_port, &lifetime) != 0) {
-          log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
-          rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
-          continue;
+      if (udp_fd >= 0) {
+        unsigned char buf[256];
+        uint32_t src_ip = 0;
+        uint16_t src_port = 0;
+        int ret;
+        uint32_t token;
+        uint16_t token_port;
+        uint32_t lifetime;
+        uint16_t target_port;
+        uint64_t rule_handle;
+
+        while ((ret = udp_recv(udp_fd, buf, sizeof(buf), &src_ip, &src_port)) > 0) {
+          token = 0;
+          token_port = 0;
+          lifetime = 0;
+
+          if (rate_limit_check(src_ip, now) != 0) {
+            log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
+            continue;
+          }
+
+          if (auth_parse(buf, (size_t)ret, &token, &token_port, &lifetime) != 0) {
+            log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
+            rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+            continue;
+          }
+
+          if (auth_validate
+              (d->cfg->secret, d->cfg->secret_len, token, src_ip, now,
+               TOTP_DIGITS, TOTP_STEP, DRIFT_BEHIND, DRIFT_AHEAD) != 0) {
+            log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
+            rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+            continue;
+          }
+
+          rate_limit_success(src_ip);
+
+          target_port = token_port ? token_port : d->cfg->target_port;
+
+          rule_handle = netlink_rule_insert(src_ip, target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
+          if (rule_handle == 0) {
+            log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
+            continue;
+          }
+
+          snprintf(logbuf, sizeof(logbuf),
+                   "accepted from %u.%u.%u.%u:%u (handle %llu)",
+                   (src_ip >> 0) & 0xff, (src_ip >> 8) & 0xff,
+                   (src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff, (unsigned)src_port, (unsigned long long)rule_handle);
+          log_msg(d->cfg, LOG_INFO, logbuf);
         }
-
-        if (auth_validate(d->cfg->secret, d->cfg->secret_len,
-                          token, src_ip, now, TOTP_DIGITS, TOTP_STEP, DRIFT_BEHIND, DRIFT_AHEAD) != 0) {
-          log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
-          rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
-          continue;
-        }
-
-        rate_limit_success(src_ip);
-
-        target_port = token_port ? token_port : d->cfg->target_port;
-
-        rule_handle = netlink_rule_insert(src_ip, target_port);
-        if (rule_handle == 0) {
-          log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
-          continue;
-        }
-
-        snprintf(logbuf, sizeof(logbuf),
-                 "accepted from %u.%u.%u.%u:%u (handle %llu)",
-                 (src_ip >> 0) & 0xff,
-                 (src_ip >> 8) & 0xff,
-                 (src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff, (unsigned)src_port, (unsigned long long)rule_handle);
-        log_msg(d->cfg, LOG_INFO, logbuf);
       }
     }
   }
@@ -466,6 +593,8 @@ int daemon_process(struct daemon *d)
 
 void daemon_cleanup(struct daemon *d)
 {
+  int i;
+
   if (d->signal_fd >= 0) {
     close(d->signal_fd);
     d->signal_fd = -1;
@@ -474,10 +603,13 @@ void daemon_cleanup(struct daemon *d)
     close(d->epoll_fd);
     d->epoll_fd = -1;
   }
-  if (d->udp_fd >= 0) {
-    close(d->udp_fd);
-    d->udp_fd = -1;
+  for (i = 0; i < d->num_udp_fds; i++) {
+    if (d->udp_fds[i] >= 0) {
+      close(d->udp_fds[i]);
+      d->udp_fds[i] = -1;
+    }
   }
+  d->num_udp_fds = 0;
   netlink_cleanup();
   if (!d->cfg->foreground) {
     closelog();
@@ -514,7 +646,6 @@ int main(int argc, char *argv[])
   struct config cfg;
 
   memset(&cfg, 0, sizeof(cfg));
-  cfg.port = 2222;
   cfg.target_port = 22;
   cfg.timeout = 30;
   cfg.rate_limit.min_block = 300;

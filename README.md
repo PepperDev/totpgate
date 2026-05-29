@@ -70,11 +70,14 @@ warnings** before the section is considered complete.
 ```sh
 totpgated --port 2222 --target-port 22 --secret "JBSWY3DPEHPK3PXP" --timeout 30
 totpgated --port 2222 --target-port 22 --secret-file /etc/totpgate.key --foreground
+totpgated --port 0.0.0.0:2222 --port 192.168.1.1:2223 --interface eth0 --secret "JBSWY3DPEHPK3PXP"
 totpgate  --secret "hex:48656c6c6f" --port 2222 server.example.com
 ```
 
 The daemon listens on UDP `--port` for a valid TOTP.  On match the
 sender's IP is allowed to open a TCP connection to `--target-port` for `--timeout` seconds.
+`--port` may be given multiple times to listen on different addresses/ports,
+and `--interface` restricts firewall rules to a single network interface.
 
 When `totpgated` starts it flushes any stale rules from a prior session,
 inserts a permanent `ct state established,related accept` rule, and installs

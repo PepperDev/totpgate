@@ -24,8 +24,11 @@ Read shared secret from a file. The file content follows the same
 encoding rules as \fB\-\-secret\fR. Mutually exclusive with
 \fB\-\-secret\fR. A warning is emitted if the file is world-readable.
 .TP
-\fB\-\-port\fR \fIport\fR
-UDP listen port. (default: 2222)
+\fB\-\-port\fR \fI[ip:]port\fR
+UDP listen port. May be given multiple times to listen on different
+addresses or ports. When prefixed with an IP (e.g. \fB0.0.0.0:2222\fR,
+\fB[::]:2222\fR) the daemon binds only to that address; without a prefix
+it binds to all interfaces (default: 2222).
 .TP
 \fB\-\-target-port\fR \fIport\fR
 TCP application port to protect. (default: 22)
@@ -47,6 +50,12 @@ Drop privileges to this user after binding socket. (default: nobody)
 .TP
 \fB\-\-group\fR \fIgroup\fR
 Use this group after dropping privileges. (default: nogroup)
+.TP
+\fB\-\-interface\fR \fIname\fR
+Network interface (e.g. \fBeth0\fR) to restrict firewall rules to. When
+set, the default-drop rule and every ephemeral accept rule include an
+nftables \fBiifname\fR match so that only traffic arriving on that
+interface is affected.
 .TP
 \fB\-\-foreground\fR
 Log to stderr instead of syslog.
@@ -81,12 +90,16 @@ failure count.
 The daemon manages an nftables table named \fBtotpgate\fR:
 .TP
 Permanent rules
-ct state established,related accept; non-target TCP ports accept;
-target TCP port drop.
+\fR[\fBiifname <iface>\fR] ct state established,related accept;
+\fR[\fBiifname <iface>\fR] tcp dport != <target> accept;
+\fR[\fBiifname <iface>\fR] tcp dport <target> drop.
 .TP
 Ephemeral rules
-ip saddr <client> tcp dport <target> ct state new accept (auto-expires
-after \fB\-\-timeout\fR seconds).
+\fR[\fBiifname <iface>\fR] ip saddr <client> tcp dport <target> ct
+state new accept (auto-expires after \fB\-\-timeout\fR seconds).
+
+The \fBiifname\fR match is included only when \fB\-\-interface\fR is
+given.
 .SH SIGNALS
 .TP
 SIGTERM, SIGINT

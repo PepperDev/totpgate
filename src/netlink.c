@@ -181,6 +181,20 @@ static void add_expr_meta_l4proto(struct nlmsghdr *nlh, uint32_t dreg)
   end_nest(nlh, expr);
 }
 
+static void add_expr_meta_iifname(struct nlmsghdr *nlh, uint32_t dreg)
+{
+  struct nlattr *expr, *data;
+  uint32_t key = NFT_META_IIFNAME;
+
+  expr = begin_nest(nlh, NFTA_LIST_ELEM);
+  put_str(nlh, NFTA_EXPR_NAME, "meta");
+  data = begin_nest(nlh, NFTA_EXPR_DATA);
+  put_attr(nlh, NFTA_META_DREG, 4, &dreg);
+  put_attr(nlh, NFTA_META_KEY, 4, &key);
+  end_nest(nlh, data);
+  end_nest(nlh, expr);
+}
+
 static void add_expr_ct_state(struct nlmsghdr *nlh, uint32_t dreg)
 {
   struct nlattr *expr, *data;
@@ -303,6 +317,19 @@ static int nl_parse_u64(const void *reply, size_t rlen, uint16_t want_type, uint
   return -1;
 }
 
+/* ---- helpers to optionally prepend iifname match ---- */
+
+static void maybe_add_iifname(struct nlmsghdr *nlh, const char *iface)
+{
+  uint32_t reg = NFT_REG32_00;
+  uint32_t eq = NFT_CMP_EQ;
+
+  if (iface != NULL && iface[0] != '\0') {
+    add_expr_meta_iifname(nlh, reg);
+    add_expr_cmp(nlh, reg, eq, iface, (uint32_t) strlen(iface) + 1);
+  }
+}
+
 /* ---- public API ---- */
 
 int netlink_init(void)
@@ -378,7 +405,7 @@ int netlink_flush_chain(void)
   return nl_talk(buf, nlh->nlmsg_len);
 }
 
-int netlink_add_established_rule(void)
+int netlink_add_established_rule(const char *iface)
 {
   char buf[BUF_SIZE];
   struct nlmsghdr *nlh;
@@ -398,6 +425,7 @@ int netlink_add_established_rule(void)
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
 
+    maybe_add_iifname(nlh, iface);
     add_expr_ct_state(nlh, reg);
     add_expr_bitwise(nlh, reg, reg, 4, &mask_be, &xor_be);
     add_expr_cmp(nlh, reg, neq, cmp_zero, 4);
@@ -409,7 +437,7 @@ int netlink_add_established_rule(void)
   return nl_talk(buf, nlh->nlmsg_len);
 }
 
-int netlink_add_default_drop(uint16_t port)
+int netlink_add_default_drop(uint16_t port, const char *iface)
 {
   char buf[BUF_SIZE];
   struct nlmsghdr *nlh;
@@ -428,6 +456,7 @@ int netlink_add_default_drop(uint16_t port)
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
 
+    maybe_add_iifname(nlh, iface);
     add_expr_meta_l4proto(nlh, reg);
     add_expr_cmp(nlh, reg, eq, tcp_val, 1);
     add_expr_payload_load(nlh, base, 2, 2, reg);
@@ -464,7 +493,7 @@ int netlink_add_default_drop(uint16_t port)
   return 0;
 }
 
-uint64_t netlink_rule_insert(uint32_t ip, uint16_t port)
+uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
 {
   char buf[BUF_SIZE];
   struct nlmsghdr *nlh;
@@ -490,6 +519,7 @@ uint64_t netlink_rule_insert(uint32_t ip, uint16_t port)
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
 
+    maybe_add_iifname(nlh, iface);
     add_expr_payload_load(nlh, base_n, 12, 4, reg);
     add_expr_cmp(nlh, reg, eq, &ip_be, 4);
     add_expr_payload_load(nlh, base_t, 2, 2, reg);

@@ -21,9 +21,9 @@ IP to open a TCP connection to a protected port for 30 seconds.
 The daemon `totpgated` accepts:
 
 | Argument | Default | Description |
-|---|---|---|
-| `--port` | `2222` | UDP port the daemon listens for TOTP packets. May be given multiple times with optional IP binding (`[ip:]port`). Planned — currently single port only. |
-| `--interface` | — | Network interface to bind firewall rules to (source IP). Planned — not yet implemented. |
+|---|---|---|---|
+| `--port` | `2222` | UDP listen port. May be given multiple times with optional IP binding (`[ip:]port`, e.g. `0.0.0.0:2222` or `[::]:2222`). |
+| `--interface` | — | Network interface (e.g. `eth0`) to bind firewall `iifname` matches to. If omitted, rules match on any interface. |
 | `--target-port` | `22` | TCP application port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding); mutually exclusive with `--secret-file` |
 | `--secret-file` | — | Path to file containing the shared secret (see §2.1 for encoding); mutually exclusive with `--secret` |
@@ -197,8 +197,12 @@ ON  startup:
         create chain "input" (hook input, priority 0)
     flush chain "totpgate input"          // removes stale rules
     insert rule: ct state established,related accept   // permanent
-    insert rule: tcp dport <target> drop              // default-drop
+    insert rule: [iifname <interface>] tcp dport <target> drop  // default-drop
 ```
+
+If `--interface` was given, the drop rule (and every ephemeral accept rule)
+includes an `iifname <interface>` match so that rules only apply to packets
+arriving on that interface.
 
 ### BR-5  Auth-grant lifecycle
 
@@ -237,8 +241,8 @@ START
   │      ├─ create chain "input" if missing
   │      ├─ flush chain (remove stale rules from prior session)
   │      ├─ insert: ct state established,related accept
-  │      └─ insert: tcp dport <target> drop
-  ├─ 3. Bind UDP socket to <port>
+  │      └─ insert: [iifname <interface>] tcp dport <target> drop
+  ├─ 3. Bind UDP socket(s) — iterate each --port entry, resolve address, bind
   ├─ 4. Drop privileges
   │
   └─ LOOP:
