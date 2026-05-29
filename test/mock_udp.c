@@ -58,7 +58,15 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
   if (g_last_fd < 0)
     return -1;
 
-  bind(g_last_fd, (struct sockaddr *)addr, addrlen);
+  {
+    int yes = 1;
+    setsockopt(g_last_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+  }
+  if (bind(g_last_fd, (struct sockaddr *)addr, addrlen) != 0) {
+    close(g_last_fd);
+    g_last_fd = -1;
+    return -1;
+  }
   g_udp_open_ret = g_last_fd;
   return g_last_fd;
 }

@@ -434,7 +434,11 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   d->num_udp_fds = 0;
   d->epoll_fd = -1;
   d->signal_fd = -1;
-  d->last_prune = 0;
+  {
+    struct timespec _ts;
+    clock_gettime(CLOCK_MONOTONIC, &_ts);
+    d->last_prune = _ts.tv_sec;
+  }
   memset(d->rules, 0, sizeof(d->rules));
   d->num_rules = 0;
 
@@ -466,6 +470,13 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   if (netlink_add_established_rule(iface) != 0) {
     fprintf(stderr, "error: netlink_add_established_rule: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "netlink_add_established_rule failed");
+    daemon_cleanup(d);
+    return -1;
+  }
+
+  if (netlink_add_jump_allowed() != 0) {
+    fprintf(stderr, "error: netlink_add_jump_allowed: %s\n", strerror(errno));
+    log_msg(cfg, LOG_ERR, "netlink_add_jump_allowed failed");
     daemon_cleanup(d);
     return -1;
   }
@@ -546,12 +557,15 @@ int daemon_process(struct daemon *d)
     return -1;
   }
 
-  now = time(NULL);
-
-  if (now - d->last_prune >= PRUNE_INTERVAL) {
-    auth_replay_prune(now, 3600);
-    rule_prune(d, now);
-    d->last_prune = now;
+  {
+    struct timespec _ts;
+    clock_gettime(CLOCK_MONOTONIC, &_ts);
+    now = time(NULL);
+    if (_ts.tv_sec - d->last_prune >= PRUNE_INTERVAL) {
+      d->last_prune = _ts.tv_sec;
+      auth_replay_prune(now, 3600);
+      rule_prune(d, now);
+    }
   }
 
   for (i = 0; i < nfds; i++) {

@@ -16,15 +16,15 @@
 #define NFT_BITWISE_MASK_XOR 0
 #endif
 
-#define TABLE_NAME  "totpgate"
-#define CHAIN_NAME  "input"
-#define BUF_SIZE    4096
+#define TABLE_NAME    "totpgate"
+#define CHAIN_NAME    "input"
+#define ALLOWED_NAME  "allowed_ips"
+#define BUF_SIZE      4096
 
 static int g_fd = -1;
 static uint32_t g_seq;
 static uint32_t g_portid;
 static uint64_t g_next_handle;
-static uint64_t g_drop_handle;
 
 /* helpers for raw byte-order conversion without <arpa/inet.h> */
 
@@ -157,6 +157,27 @@ static void add_expr_immediate_verdict(struct nlmsghdr *nlh, uint32_t verdict)
     struct nlattr *vd2 = begin_nest(nlh, NFTA_DATA_VERDICT);
 
     put_be32(nlh, NFTA_VERDICT_CODE, verdict);
+    end_nest(nlh, vd2);
+  }
+  end_nest(nlh, vd);
+  end_nest(nlh, data);
+  end_nest(nlh, expr);
+}
+
+static void add_expr_immediate_verdict_chain(struct nlmsghdr *nlh, uint32_t verdict, const char *chain)
+{
+  struct nlattr *expr, *data, *vd;
+
+  expr = begin_nest(nlh, NFTA_LIST_ELEM);
+  put_str(nlh, NFTA_EXPR_NAME, "immediate");
+  data = begin_nest(nlh, NFTA_EXPR_DATA);
+  put_be32(nlh, NFTA_IMMEDIATE_DREG, NFT_REG_VERDICT);
+  vd = begin_nest(nlh, NFTA_IMMEDIATE_DATA);
+  {
+    struct nlattr *vd2 = begin_nest(nlh, NFTA_DATA_VERDICT);
+
+    put_be32(nlh, NFTA_VERDICT_CODE, verdict);
+    put_str(nlh, NFTA_VERDICT_CHAIN, chain);
     end_nest(nlh, vd2);
   }
   end_nest(nlh, vd);
@@ -321,7 +342,6 @@ static int nl_batch_talk(char *buf, size_t len)
 
   for (;;) {
     char reply[BUF_SIZE];
-    struct nlmsghdr *nlh;
     struct pollfd pfd;
 
     pfd.fd = g_fd;
@@ -341,13 +361,29 @@ static int nl_batch_talk(char *buf, size_t len)
       continue;
     }
 
-    nlh = (struct nlmsghdr *)reply;
-    if (nlh->nlmsg_type == NLMSG_ERROR) {
-      const struct nlmsgerr *er = (const struct nlmsgerr *)NLMSG_DATA(nlh);
+    {
+      struct nlmsghdr *nlh = (struct nlmsghdr *)reply;
+      int remaining = (int)n;
 
-      if (er->error != 0) {
-        last_err = -er->error;
-        errno = -er->error;
+      while (NLMSG_OK(nlh, remaining)) {
+        if (nlh->nlmsg_type == NLMSG_ERROR) {
+          const struct nlmsgerr *er = (const struct nlmsgerr *)NLMSG_DATA(nlh);
+          int e;
+
+          if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(struct nlmsgerr))) {
+            errno = EBADMSG;
+            return -1;
+          }
+          if (er->error < 0)
+            e = -er->error;
+          else
+            e = er->error;
+          if (e != 0) {
+            last_err = e;
+            errno = e;
+          }
+        }
+        nlh = NLMSG_NEXT(nlh, remaining);
       }
     }
   }
@@ -402,6 +438,18 @@ int netlink_init(void)
     g_portid = sa.nl_pid;
   }
 
+  /* delete existing table to reset kernel hgenerator */
+  {
+    char delbuf[BUF_SIZE];
+    struct nlmsghdr *delhdr;
+
+    memset(delbuf, 0, sizeof(delbuf));
+    delhdr = msg_start(delbuf);
+    msg_set(delhdr, NFT_MSG_DELTABLE, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
+    put_attr(delhdr, NFTA_TABLE_NAME, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
+    nl_talk_wrapped(delbuf, delhdr->nlmsg_len);
+  }
+
   /* --- build init batch: BATCH_BEGIN + NEWTABLE + NEWCHAIN + BATCH_END --- */
   memset(buf, 0, sizeof(buf));
   cur = buf;
@@ -445,6 +493,13 @@ int netlink_init(void)
   }
   cur += NLMSG_ALIGN(nlh->nlmsg_len);
 
+  /* NEWCHAIN (allowed_ips) */
+  nlh = msg_start(cur);
+  msg_set(nlh, NFT_MSG_NEWCHAIN, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
+  put_attr(nlh, NFTA_CHAIN_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
+  put_attr(nlh, NFTA_CHAIN_NAME, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
+  cur += NLMSG_ALIGN(nlh->nlmsg_len);
+
   /* BATCH_END */
   nlh = batch_msg(cur, NFNL_MSG_BATCH_END, NLM_F_REQUEST, NFNL_SUBSYS_NFTABLES);
   cur += NLMSG_ALIGN(nlh->nlmsg_len);
@@ -455,8 +510,8 @@ int netlink_init(void)
     return -1;
   }
 
-  g_next_handle = 1;
-  g_drop_handle = 0;
+  /* chains consume handles too (each NEWCHAIN increments hgenerator) */
+  g_next_handle = 3;
   return 0;
 }
 
@@ -469,7 +524,7 @@ int netlink_flush_chain(void)
   nlh = msg_start(buf);
   msg_set(nlh, NFT_MSG_DELRULE, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
   put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
-  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
+  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
 
   return nl_talk_wrapped(buf, nlh->nlmsg_len);
 }
@@ -537,7 +592,33 @@ int netlink_add_default_drop(uint16_t port, const char *iface)
   if (nl_talk_wrapped(buf, nlh->nlmsg_len) != 0) {
     return -1;
   }
-  g_drop_handle = g_next_handle++;
+  g_next_handle++;
+  return 0;
+}
+
+int netlink_add_jump_allowed(void)
+{
+  char buf[BUF_SIZE];
+  struct nlmsghdr *nlh;
+
+  memset(buf, 0, sizeof(buf));
+  nlh = msg_start(buf);
+  msg_set(nlh, NFT_MSG_NEWRULE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_APPEND | NLM_F_CREATE, AF_INET);
+  put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
+  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
+
+  {
+    struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
+
+    add_expr_immediate_verdict_chain(nlh, NFT_JUMP, ALLOWED_NAME);
+
+    end_nest(nlh, exprs);
+  }
+
+  if (nl_talk_wrapped(buf, nlh->nlmsg_len) != 0) {
+    return -1;
+  }
+  g_next_handle++;
   return 0;
 }
 
@@ -551,11 +632,7 @@ uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
   nlh = msg_start(buf);
   msg_set(nlh, NFT_MSG_NEWRULE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_APPEND | NLM_F_CREATE, AF_INET);
   put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
-  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
-
-  if (g_drop_handle != 0) {
-    put_be64(nlh, NFTA_RULE_POSITION, g_drop_handle);
-  }
+  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
 
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
@@ -586,7 +663,7 @@ int netlink_rule_delete(uint64_t handle)
   nlh = msg_start(buf);
   msg_set(nlh, NFT_MSG_DELRULE, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
   put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
-  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
+  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
   put_be64(nlh, NFTA_RULE_HANDLE, handle);
 
   return nl_talk_wrapped(buf, nlh->nlmsg_len);

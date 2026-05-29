@@ -66,6 +66,11 @@ int netlink_add_default_drop(uint16_t port, const char *iface)
   return g_nl_drop_ret;
 }
 
+int netlink_add_jump_allowed(void)
+{
+  return 0;
+}
+
 uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
 {
   g_nl_insert_ip = ip;

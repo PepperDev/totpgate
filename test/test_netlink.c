@@ -137,6 +137,14 @@ static void test_add_established_ok(void)
   ASSERT_INT_EQ(ret, 0);
 }
 
+static void test_add_jump_allowed_ok(void)
+{
+  int ret;
+
+  ret = netlink_add_jump_allowed();
+  ASSERT_INT_EQ(ret, 0);
+}
+
 static void test_add_default_drop_ok(void)
 {
   int ret;
@@ -151,8 +159,7 @@ static void test_rule_insert_ok(void)
 
   h = netlink_rule_insert(0xc0a80101, 22, NULL);
   ASSERT_TRUE(h != 0);
-  /* after init(established=1,drop=2) this is the 3rd rule */
-  ASSERT_INT_EQ((int)h, 3);
+  ASSERT_INT_EQ((int)h, 6);
 }
 
 static void test_rule_delete_ok(void)
@@ -177,6 +184,7 @@ TEST_GROUP(netlink)
 TEST(test_init_ok),
       TEST(test_flush_chain_ok),
       TEST(test_add_established_ok),
+      TEST(test_add_jump_allowed_ok),
       TEST(test_add_default_drop_ok),
       TEST(test_rule_insert_ok), TEST(test_rule_delete_ok), TEST(test_cleanup), END_TEST};
 
