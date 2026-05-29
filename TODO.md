@@ -26,7 +26,7 @@
 
 ## Robustness
 
-- [ ] **Firewall cleanup on graceful exit**: catch SIGINT and delete the
+- [x] **Firewall cleanup on graceful exit**: catch SIGINT and delete the
   totpgate table (or at least the default-drop rule and any dynamic rules)
   so no stale firewall state remains if the daemon restarts.
 

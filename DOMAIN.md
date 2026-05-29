@@ -120,23 +120,29 @@ A netfilter rule inserted via netlink into the **nftables** `ip` family.
 Attributes:
 
 - **Table**: `totpgate` (created by daemon at startup).
-- **Chain**: `input` (hook `NF_INET_LOCAL_IN`, priority 0).
+- **Chain**: `input` (hook `NF_INET_LOCAL_IN`, priority -10).
 - **Default policy**: `accept` (all non-matching traffic passes through).
 
 **Permanent rules** (installed at startup, never expire):
 
-| Priority | Match | Action |
-|---|---|---|
-| 0 | `ct state established,related` | `accept` |
-| — | `tcp dport != <target_port>` | `accept` (skip non-target) |
-| — | `tcp dport <target_port>` | `drop` (silent, unmatched SYN) |
+| Match | Action |
+|---|---|
+| `ct state established,related` | `accept` |
+| `[iifname <interface>] tcp dport <target_port>` | `drop` (silent, unmatched SYN) |
+
+Non-target traffic hits the default `accept` policy implicitly — no
+explicit skip-non-target rule is needed.
 
 **Ephemeral rules** (inserted on successful auth, auto-expire after
 `--timeout` seconds):
 
 | Match | Action |
 |---|---|
-| `ip saddr <client_ip> tcp dport <target_port> ct state new` | `accept` |
+| `ip saddr <client_ip> tcp dport <target_port>` | `accept` |
+
+The ephemeral rule omits `ct state new` because the permanent
+`established,related accept` rule is evaluated first in the chain and
+catches non-new packets — the ephemeral rule only matches what reaches it.
 
 ### 2.6  `auth_session`
 
@@ -208,9 +214,13 @@ arriving on that interface.
 
 ```
 ON  successful authentication:
-    insert rule: ip saddr <client_ip> tcp dport <target> ct state new accept
+    insert rule: ip saddr <client_ip> tcp dport <target> accept
                   // auto-expires after <timeout> seconds
 ```
+
+The rule omits `ct state new` — the permanent `established,related accept`
+rule (BR-4) is evaluated first, so the ephemeral rule only ever sees
+non-established, non-related packets.
 
 ### BR-6  Privilege drop
 
@@ -225,7 +235,8 @@ AFTER  UDP socket is bound (< 1024 requires CAP_NET_BIND_SERVICE):
 ### BR-7  Ephemeral rule timeout
 
 Auth-granted rules have a lifetime set by `--timeout` (default 30 s).  The
-kernel automatically removes them after expiry.
+daemon tracks each rule's handle and expiry time in a fixed-size array;
+every 5 s the event loop prunes expired rules via `netlink_rule_delete()`.
 
 ### BR-8  Rate limiting
 

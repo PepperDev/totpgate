@@ -33,6 +33,13 @@
 #define PRUNE_INTERVAL 5
 #define SECRET_FILE_MAX 4096
 #define MAX_PORTS 8
+#define MAX_DYNAMIC_RULES 256
+
+struct dynamic_rule {
+  uint64_t handle;
+  time_t expiry;
+  int active;
+};
 
 struct listen_addr {
   struct sockaddr_storage addr;
@@ -63,6 +70,8 @@ struct daemon {
   int signal_fd;
   int maxevents;
   time_t last_prune;
+  struct dynamic_rule rules[MAX_DYNAMIC_RULES];
+  int num_rules;
 };
 
 static int parse_listen_addr(const char *s, struct listen_addr *la)
@@ -384,6 +393,32 @@ int read_secret_file(const char *path, struct config *cfg)
   return 0;
 }
 
+static void rule_track(struct daemon *d, uint64_t handle, time_t expiry)
+{
+  int i;
+  for (i = 0; i < MAX_DYNAMIC_RULES; i++) {
+    if (!d->rules[i].active) {
+      d->rules[i].handle = handle;
+      d->rules[i].expiry = expiry;
+      d->rules[i].active = 1;
+      if (i >= d->num_rules)
+        d->num_rules = i + 1;
+      return;
+    }
+  }
+}
+
+void rule_prune(struct daemon *d, time_t now)
+{
+  int i;
+  for (i = 0; i < d->num_rules; i++) {
+    if (d->rules[i].active && now >= d->rules[i].expiry) {
+      netlink_rule_delete(d->rules[i].handle);
+      d->rules[i].active = 0;
+    }
+  }
+}
+
 void daemon_cleanup(struct daemon *d);
 
 int daemon_setup(struct daemon *d, struct config *cfg)
@@ -400,6 +435,8 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   d->epoll_fd = -1;
   d->signal_fd = -1;
   d->last_prune = 0;
+  memset(d->rules, 0, sizeof(d->rules));
+  d->num_rules = 0;
 
   {
     struct rlimit rl;
@@ -513,6 +550,7 @@ int daemon_process(struct daemon *d)
 
   if (now - d->last_prune >= PRUNE_INTERVAL) {
     auth_replay_prune(now, 3600);
+    rule_prune(d, now);
     d->last_prune = now;
   }
 
@@ -585,6 +623,11 @@ int daemon_process(struct daemon *d)
             continue;
           }
 
+          {
+            uint32_t rule_lifetime = lifetime ? lifetime : d->cfg->timeout;
+            rule_track(d, rule_handle, now + (time_t) rule_lifetime);
+          }
+
           snprintf(logbuf, sizeof(logbuf),
                    "accepted from %u.%u.%u.%u:%u (handle %llu)",
                    (src_ip >> 0) & 0xff, (src_ip >> 8) & 0xff,
@@ -617,6 +660,8 @@ void daemon_cleanup(struct daemon *d)
     }
   }
   d->num_udp_fds = 0;
+  memset(d->rules, 0, sizeof(d->rules));
+  d->num_rules = 0;
   netlink_cleanup();
   if (!d->cfg->foreground) {
     closelog();

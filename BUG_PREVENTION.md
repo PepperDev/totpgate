@@ -45,6 +45,19 @@
 
 ## Past incidents
 
+### 2026-05-29: Ephemeral rule timeout not enforced
+
+**Bug**: `daemon_process()` called `netlink_rule_insert()` and logged the
+returned handle but never stored it.  The `lifetime` parsed from the auth
+packet was also ignored.  Rules persisted until daemon restart.
+
+**Root cause**: No data structure tracked dynamic rule handles with their
+expiry times; the prune path only handled the replay table.
+
+**Prevention**: Any new "insert then later delete" feature must include a
+tracking array and a prune callback wired into the event loop's periodic
+maintenance path (see `rule_track()` / `rule_prune()` in `main.c`).
+
 ### 2026-05-28: Wrong SHA-1 round constant K[20..39]
 
 **Bug**: `sha1.c` used `0x6ed6eba1` instead of the correct `0x6ed9eba1` for the

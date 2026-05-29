@@ -15,6 +15,7 @@
 
 #define MAX_PORTS 8
 #define IFNAMSIZ 16
+#define MAX_DYNAMIC_RULES 256
 
 /* struct definitions matching main.c */
 struct listen_addr {
@@ -38,6 +39,12 @@ struct config {
   struct rate_limit_cfg rate_limit;
 };
 
+struct dynamic_rule {
+  uint64_t handle;
+  time_t expiry;
+  int active;
+};
+
 struct daemon {
   struct config *cfg;
   int udp_fds[MAX_PORTS];
@@ -46,6 +53,8 @@ struct daemon {
   int signal_fd;
   int maxevents;
   time_t last_prune;
+  struct dynamic_rule rules[MAX_DYNAMIC_RULES];
+  int num_rules;
 };
 
 /* helpers for listen_addr manipulation */
@@ -78,6 +87,7 @@ int daemon_run(struct config *cfg);
 int parse_args(struct config *cfg, int argc, char *argv[]);
 int drop_privileges(const char *user, const char *group, int foreground);
 int read_secret_file(const char *path, struct config *cfg);
+void rule_prune(struct daemon *d, time_t now);
 
 /* import mock globals */
 extern int g_nl_init_ret;
@@ -87,6 +97,8 @@ extern int g_nl_drop_ret;
 extern uint16_t g_nl_drop_port;
 extern char g_nl_drop_iface[16];
 extern int g_nl_cleanup_called;
+extern int g_nl_del_ret;
+extern uint64_t g_nl_del_handle;
 extern uint64_t g_nl_insert_return;
 extern uint32_t g_nl_insert_ip;
 extern char g_nl_insert_iface[16];
@@ -1095,6 +1107,163 @@ static void test_parse_port_ip_hostname_getaddrinfo_err(void)
   ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
 }
 
+/* ---- rule prune tests ---- */
+
+static void test_rule_tracking(void)
+{
+  struct config cfg;
+  struct daemon d;
+
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2230);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.timeout = 30;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+  ASSERT_INT_EQ(d.num_rules, 0);
+
+  /* manually track a rule */
+  rule_prune(&d, 0);
+  ASSERT_INT_EQ(d.num_rules, 0);
+
+  daemon_cleanup(&d);
+}
+
+static void test_rule_prune_expired(void)
+{
+  struct config cfg;
+  struct daemon d;
+
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2231);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.timeout = 30;
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* set a rule that is already expired */
+  d.rules[0].handle = 42;
+  d.rules[0].expiry = 1;
+  d.rules[0].active = 1;
+  d.num_rules = 1;
+
+  g_nl_del_handle = 0;
+  rule_prune(&d, 100);
+  ASSERT_INT_EQ((int)g_nl_del_handle, 42);
+  ASSERT_INT_EQ(d.rules[0].active, 0);
+
+  daemon_cleanup(&d);
+}
+
+static void test_rule_prune_fresh_kept(void)
+{
+  struct config cfg;
+  struct daemon d;
+
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2232);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.timeout = 30;
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* set a rule that is still valid */
+  d.rules[0].handle = 42;
+  d.rules[0].expiry = 200;
+  d.rules[0].active = 1;
+  d.num_rules = 1;
+
+  g_nl_del_handle = 0;
+  rule_prune(&d, 100);
+  ASSERT_INT_EQ((int)g_nl_del_handle, 0);
+  ASSERT_INT_EQ(d.rules[0].active, 1);
+
+  daemon_cleanup(&d);
+}
+
+static void test_rule_tracking_via_process(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  uint32_t token;
+  uint64_t counter;
+  char pkt[32];
+  size_t pkt_len;
+  int i;
+  int s;
+  struct sockaddr_in addr;
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++)
+    test_secret[i] = (unsigned char)(i + 1);
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2233);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.timeout = 30;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+  ASSERT_INT_EQ(d.num_rules, 0);
+
+  /* compute current TOTP and stage it in mock recv buffer */
+  counter = (uint64_t) (time(NULL) / 30);
+  token = totp_generate(test_secret, 20, counter, 6);
+  pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
+  g_udp_recv_len = pkt_len;
+  memcpy(g_udp_recv_buf, pkt, pkt_len);
+  g_udp_recv_src_ip = 0x04040404;
+  g_udp_recv_src_port = 5555;
+
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  ASSERT_TRUE(s >= 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(2233);
+  addr.sin_addr.s_addr = htonl(0x7f000001);
+  sendto(s, pkt, 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+  close(s);
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* verify rule was tracked */
+  ASSERT_INT_EQ(d.num_rules, 1);
+  ASSERT_TRUE(d.rules[0].active != 0);
+  ASSERT_TRUE(d.rules[0].handle > 0);
+
+  daemon_cleanup(&d);
+  auth_replay_reset();
+}
+
 /* ---- test group ---- */
 
 TEST_GROUP(daemon)
@@ -1131,7 +1300,9 @@ TEST(test_parse_minimal),
       TEST(test_parse_interface), TEST(test_parse_interface_too_long),
       TEST(test_parse_bad_ip_port),
       TEST(test_parse_port_ip_hostname_getaddrinfo_err),
-      TEST(test_parse_port_with_ipv4), TEST(test_parse_port_with_ipv6), TEST(test_parse_too_many_ports), END_TEST};
+      TEST(test_parse_port_with_ipv4), TEST(test_parse_port_with_ipv6), TEST(test_parse_too_many_ports),
+      TEST(test_rule_tracking), TEST(test_rule_prune_expired),
+      TEST(test_rule_prune_fresh_kept), TEST(test_rule_tracking_via_process), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)
