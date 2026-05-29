@@ -37,6 +37,8 @@
 
 ---
 
+- [ ] **Seccomp mode constant**: `prctl(PR_SET_SECCOMP, ...)` uses `SECCOMP_MODE_*` constants, NOT `SECCOMP_SET_MODE_*`. The set-mode constants (`SECCOMP_SET_MODE_FILTER` = 1) equal `SECCOMP_MODE_STRICT` (= 1 on this system), which enables strict mode — immediate SIGSEGV.
+
 ## Past incidents
 
 ### 2026-05-28: Wrong SHA-1 round constant K[20..39]
