@@ -22,7 +22,8 @@ The daemon `totpgated` accepts:
 
 | Argument | Default | Description |
 |---|---|---|
-| `--port` | `2222` | UDP port the daemon listens for TOTP packets |
+| `--port` | `2222` | UDP port the daemon listens for TOTP packets. May be given multiple times with optional IP binding (`[ip:]port`). Planned — currently single port only. |
+| `--interface` | — | Network interface to bind firewall rules to (source IP). Planned — not yet implemented. |
 | `--target-port` | `22` | TCP application port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding); mutually exclusive with `--secret-file` |
 | `--secret-file` | — | Path to file containing the shared secret (see §2.1 for encoding); mutually exclusive with `--secret` |
