@@ -227,6 +227,29 @@ AFTER  UDP socket is bound (< 1024 requires CAP_NET_BIND_SERVICE):
 Auth-granted rules have a lifetime set by `--timeout` (default 30 s).  The
 kernel automatically removes them after expiry.
 
+### BR-8  Rate limiting
+
+```
+ON  auth failure from <ip>:
+    IF  fail window has expired (≥ <window> s since first_fail):
+        reset fail_count to 1, first_fail to now     // fresh window
+    ELSE:
+        increment fail_count
+        IF  fail_count >= <max_fails> AND NOT currently blocked:
+            set block_duration = min(<max_block>, max(<min_block>, 2 * previous_block_duration))
+            block <ip> until now + block_duration     // exponential backoff
+
+ON  auth success from <ip>:
+    clear <ip>'s rate-limit entry entirely            // fail_count, block_until, block_duration reset to zero
+```
+
+- The first block always uses `<min_block>` seconds.
+- Each subsequent block doubles the duration, capped at `<max_block>`.
+- A successful authentication erases the entry, so the next block cycle starts
+  from `<min_block>` again.
+- Default: 5 failures in a 60-second window → 300 s block, doubling up to
+  86400 s (24 h).
+
 ---
 
 ## 4.  Lifecycle
