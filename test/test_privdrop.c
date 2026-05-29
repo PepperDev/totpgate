@@ -1,6 +1,7 @@
 #include "test_runner.h"
 #include "privdrop.h"
 
+#include <errno.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <string.h>
@@ -20,6 +21,7 @@ static int g_stub_setgroups_called;
 static int g_stub_setgid_called;
 static int g_stub_setuid_called;
 static int g_stub_prctl_called;
+static int g_stub_errno;
 
 /* ---- stubs for libc functions ---- */
 
@@ -70,21 +72,33 @@ int setgroups(size_t size, const gid_t *list)
   (void)size;
   (void)list;
   g_stub_setgroups_called = 1;
-  return g_stub_setgroups_fail ? -1 : 0;
+  if (g_stub_setgroups_fail) {
+    errno = g_stub_errno;
+    return -1;
+  }
+  return 0;
 }
 
 int setgid(gid_t gid)
 {
   (void)gid;
   g_stub_setgid_called = 1;
-  return g_stub_setgid_fail ? -1 : 0;
+  if (g_stub_setgid_fail) {
+    errno = g_stub_errno;
+    return -1;
+  }
+  return 0;
 }
 
 int setuid(uid_t uid)
 {
   (void)uid;
   g_stub_setuid_called = 1;
-  return g_stub_setuid_fail ? -1 : 0;
+  if (g_stub_setuid_fail) {
+    errno = g_stub_errno;
+    return -1;
+  }
+  return 0;
 }
 
 int prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5)
@@ -95,7 +109,11 @@ int prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4
   (void)arg4;
   (void)arg5;
   g_stub_prctl_called = 1;
-  return g_stub_prctl_fail ? -1 : 0;
+  if (g_stub_prctl_fail) {
+    errno = g_stub_errno;
+    return -1;
+  }
+  return 0;
 }
 
 /* ---- tests ---- */
@@ -114,6 +132,7 @@ static void reset_stubs(void)
   g_stub_setgid_called = 0;
   g_stub_setuid_called = 0;
   g_stub_prctl_called = 0;
+  g_stub_errno = 0;
 }
 
 static void test_drop_non_root(void)
@@ -121,9 +140,17 @@ static void test_drop_non_root(void)
   reset_stubs();
   g_stub_uid = 1000;
   g_stub_euid = 1000;
+  /* non-root: setgroups/setgid/setuid return EPERM, which is tolerated */
+  g_stub_setgroups_fail = 1;
+  g_stub_setgid_fail = 1;
+  g_stub_setuid_fail = 1;
+  g_stub_errno = EPERM;
 
   ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), 0);
-  ASSERT_INT_EQ(g_stub_setgroups_called, 0);
+  ASSERT_INT_EQ(g_stub_setgroups_called, 1);
+  ASSERT_INT_EQ(g_stub_setgid_called, 1);
+  ASSERT_INT_EQ(g_stub_setuid_called, 1);
+  ASSERT_INT_EQ(g_stub_prctl_called, 1);
 }
 
 static void test_drop_root_success(void)
@@ -165,6 +192,7 @@ static void test_drop_setgroups_fail(void)
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_setgroups_fail = 1;
+  g_stub_errno = EACCES;
 
   ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
 }
@@ -175,6 +203,7 @@ static void test_drop_setgid_fail(void)
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_setgid_fail = 1;
+  g_stub_errno = EACCES;
 
   ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
 }
@@ -185,6 +214,7 @@ static void test_drop_setuid_fail(void)
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_setuid_fail = 1;
+  g_stub_errno = EACCES;
 
   ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
 }
@@ -195,8 +225,11 @@ static void test_drop_prctl_fail(void)
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_prctl_fail = 1;
+  g_stub_errno = EACCES;
 
-  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
+  /* prctl failure only warns, does not abort the drop */
+  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), 0);
+  ASSERT_INT_EQ(g_stub_prctl_called, 1);
 }
 
 /* ---- test group ---- */

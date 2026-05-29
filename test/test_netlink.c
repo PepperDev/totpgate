@@ -23,8 +23,7 @@ static struct {
 
 static int g_fake_fd = 5;
 static int g_close_count;
-static int g_recv_mode;         /* 0 = ack, 1 = echo */
-static uint64_t g_echo_handle;
+static uint64_t g_dump_handle;
 
 /* ---- syscall stubs ---- */
 
@@ -72,54 +71,52 @@ ssize_t recv(int fd, void *buf, size_t len, int flags)
   memset(buf, 0, len);
   seq = g_last_req.hdr.nlmsg_seq;
 
-  if (g_recv_mode == 1) {
-    /* echo-style response with handle */
+  if (g_last_req.hdr.nlmsg_type == NFT_MSG_GETRULE && (g_last_req.hdr.nlmsg_flags & NLM_F_DUMP)) {
+    /* dump response: one GETRULE message with handle + NLMSG_DONE */
+    struct nlmsghdr *msg1, *done;
     struct nfgenmsg *nfg;
     struct nlattr *nla;
     size_t off;
-    nlh->nlmsg_len = (uint32_t) NLMSG_LENGTH(sizeof(struct nfgenmsg)) + NLA_HDRLEN + 8
-        + NLA_HDRLEN + 10 + NLA_HDRLEN + 6;
-    nlh->nlmsg_type = g_last_req.hdr.nlmsg_type;
-    nlh->nlmsg_seq = seq;
-    nlh->nlmsg_pid = 0;
-    nfg = (struct nfgenmsg *)NLMSG_DATA(nlh);
+
+    msg1 = nlh;
+    msg1->nlmsg_len = NLMSG_LENGTH(sizeof(struct nfgenmsg)) + NLA_HDRLEN + 8;
+    msg1->nlmsg_type = NFT_MSG_GETRULE;
+    msg1->nlmsg_flags = NLM_F_MULTI;
+    msg1->nlmsg_seq = seq;
+    msg1->nlmsg_pid = 0;
+
+    nfg = (struct nfgenmsg *)NLMSG_DATA(msg1);
     nfg->nfgen_family = AF_INET;
     nfg->version = NFNETLINK_V0;
     nfg->res_id = 0;
 
     off = NLMSG_LENGTH(sizeof(struct nfgenmsg));
-
-    /* handle attribute */
-    nla = (struct nlattr *)((char *)nlh + NLMSG_ALIGN(off));
+    nla = (struct nlattr *)((char *)msg1 + NLMSG_ALIGN(off));
     nla->nla_len = NLA_HDRLEN + 8;
     nla->nla_type = NFTA_RULE_HANDLE;
-    memcpy((char *)nla + NLA_HDRLEN, &g_echo_handle, 8);
+    memcpy((char *)nla + NLA_HDRLEN, &g_dump_handle, 8);
     off = NLMSG_ALIGN(off) + NLA_ALIGN(NLA_HDRLEN + 8);
+    msg1->nlmsg_len = (uint32_t) NLMSG_ALIGN(off);
 
-    nlh->nlmsg_len = (uint32_t) (NLMSG_ALIGN(off));
+    /* NLMSG_DONE terminates the multipart dump */
+    done = (struct nlmsghdr *)((char *)msg1 + NLMSG_ALIGN(msg1->nlmsg_len));
+    done->nlmsg_len = NLMSG_LENGTH(0);
+    done->nlmsg_type = NLMSG_DONE;
+    done->nlmsg_flags = 0;
+    done->nlmsg_seq = seq;
+    done->nlmsg_pid = 0;
 
-    return (ssize_t) nlh->nlmsg_len;
+    return (ssize_t) ((char *)done + NLMSG_ALIGN(done->nlmsg_len) - (char *)buf);
   }
 
   /* default: ACK response */
   nlh->nlmsg_len = NLMSG_LENGTH((uint32_t) sizeof(int));
   nlh->nlmsg_type = NLMSG_ERROR;
+  nlh->nlmsg_flags = 0;
   nlh->nlmsg_seq = seq;
+  nlh->nlmsg_pid = 0;
   *(int *)NLMSG_DATA(nlh) = 0;
   return (ssize_t) nlh->nlmsg_len;
-}
-
-/* ---- test helpers ---- */
-
-static void set_recv_ack(void)
-{
-  g_recv_mode = 0;
-}
-
-static void set_recv_echo(uint64_t handle)
-{
-  g_recv_mode = 1;
-  g_echo_handle = handle;
 }
 
 /* ---- tests ---- */
@@ -130,7 +127,6 @@ static void test_init_ok(void)
 
   g_fake_fd = 5;
   g_close_count = 0;
-  set_recv_ack();
   ret = netlink_init();
   ASSERT_INT_EQ(ret, 0);
 }
@@ -139,7 +135,6 @@ static void test_flush_chain_ok(void)
 {
   int ret;
 
-  set_recv_ack();
   ret = netlink_flush_chain();
   ASSERT_INT_EQ(ret, 0);
 }
@@ -148,7 +143,6 @@ static void test_add_established_ok(void)
 {
   int ret;
 
-  set_recv_ack();
   ret = netlink_add_established_rule(NULL);
   ASSERT_INT_EQ(ret, 0);
 }
@@ -157,8 +151,7 @@ static void test_add_default_drop_ok(void)
 {
   int ret;
 
-  /* echo mode so handle gets parsed */
-  set_recv_echo(42);
+  g_dump_handle = 42;
   ret = netlink_add_default_drop(22, NULL);
   ASSERT_INT_EQ(ret, 0);
 }
@@ -167,7 +160,7 @@ static void test_rule_insert_ok(void)
 {
   uint64_t h;
 
-  set_recv_echo(99);
+  g_dump_handle = 99;
   h = netlink_rule_insert(0xc0a80101, 22, NULL);
   ASSERT_TRUE(h != 0);
   ASSERT_INT_EQ((int)h, 99);
@@ -177,7 +170,6 @@ static void test_rule_delete_ok(void)
 {
   int ret;
 
-  set_recv_ack();
   ret = netlink_rule_delete(99);
   ASSERT_INT_EQ(ret, 0);
 }
@@ -185,7 +177,6 @@ static void test_rule_delete_ok(void)
 static void test_cleanup(void)
 {
   g_close_count = 0;
-  set_recv_ack();
   netlink_cleanup();
   ASSERT_TRUE(g_close_count > 0);
 }
@@ -213,8 +204,7 @@ int main(void)
     memset(&g_last_req, 0, sizeof(g_last_req));
     g_fake_fd = 5;
     g_close_count = 0;
-    g_recv_mode = 0;
-    g_echo_handle = 0;
+    g_dump_handle = 0;
     netlink_tests[ti].fn();
     printf("OK\n");
     passed++;
