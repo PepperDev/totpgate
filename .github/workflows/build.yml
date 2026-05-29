@@ -179,6 +179,7 @@ jobs:
         run: |
           export PATH="/opt/musl/${{ matrix.target.musl_arch }}-cross/bin:$PATH"
           make CC="${{ matrix.target.musl_arch }}-gcc" CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE" LDFLAGS="-static -flto"
+          ${{ matrix.target.musl_arch }}-strip bin/totpgated bin/totpgate
 
       - name: Prepare dist
         run: |
