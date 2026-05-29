@@ -20,6 +20,8 @@
 
 static int g_fd = -1;
 static uint32_t g_seq;
+static uint32_t g_portid;
+static uint64_t g_next_handle;
 static uint64_t g_drop_handle;
 
 /* helpers for raw byte-order conversion without <arpa/inet.h> */
@@ -52,7 +54,7 @@ static struct nlmsghdr *msg_start(char *buf)
   memset(nlh, 0, sizeof(*nlh));
   nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct nfgenmsg));
   nlh->nlmsg_seq = ++g_seq;
-  nlh->nlmsg_pid = 0;
+  nlh->nlmsg_pid = g_portid;
   return nlh;
 }
 
@@ -286,89 +288,6 @@ static int nl_talk(const void *msg, size_t len)
   return 0;
 }
 
-/* parse the first u64 attribute of given type from a single netlink message */
-static int nl_parse_u64_in_msg(const struct nlmsghdr *nlh, uint16_t want_type, uint64_t *val)
-{
-  size_t remaining;
-  int off;
-
-  if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(struct nfgenmsg))) {
-    return -1;
-  }
-  remaining = NLMSG_PAYLOAD(nlh, sizeof(struct nfgenmsg));
-  off = 0;
-
-  while (off + (int)sizeof(struct nlattr) <= (int)remaining) {
-    struct nlattr *attr = (struct nlattr *)((char *)NLMSG_DATA(nlh)
-                                            + sizeof(struct nfgenmsg) + off);
-
-    if (attr->nla_len < sizeof(struct nlattr)) {
-      break;
-    }
-    if ((attr->nla_type & NLA_TYPE_MASK) == want_type) {
-      if (attr->nla_len >= NLA_HDRLEN + 8) {
-        memcpy(val, (const char *)attr + NLA_HDRLEN, 8);
-        return 0;
-      }
-    }
-    off += (int)NLA_ALIGN(attr->nla_len);
-  }
-  return -1;
-}
-
-/* ---- dump helpers ---- */
-
-static uint64_t netlink_last_handle(void)
-{
-  char buf[BUF_SIZE];
-  struct nlmsghdr *nlh;
-  struct sockaddr_nl sa;
-  uint64_t highest = 0;
-
-  memset(buf, 0, sizeof(buf));
-  nlh = msg_start(buf);
-  msg_set(nlh, NFT_MSG_GETRULE, NLM_F_REQUEST | NLM_F_DUMP, AF_INET);
-  put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
-  put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
-
-  memset(&sa, 0, sizeof(sa));
-  sa.nl_family = AF_NETLINK;
-  if (sendto(g_fd, buf, nlh->nlmsg_len, 0, (const struct sockaddr *)&sa, sizeof(sa)) < 0) {
-    return 0;
-  }
-
-  for (;;) {
-    char reply[BUF_SIZE];
-    struct nlmsghdr *rh;
-    size_t remaining;
-    ssize_t n;
-
-    n = recv(g_fd, reply, sizeof(reply), 0);
-    if (n < 0) {
-      return 0;
-    }
-    remaining = (size_t)n;
-    rh = (struct nlmsghdr *)reply;
-
-    while (NLMSG_OK(rh, remaining)) {
-      if (rh->nlmsg_type == NLMSG_ERROR) {
-        return 0;
-      }
-      if (rh->nlmsg_type == NLMSG_DONE) {
-        return highest;
-      }
-      if (rh->nlmsg_type == NFT_MSG_GETRULE) {
-        uint64_t h = 0;
-
-        if (nl_parse_u64_in_msg(rh, NFTA_RULE_HANDLE, &h) == 0 && h > highest) {
-          highest = h;
-        }
-      }
-      rh = NLMSG_NEXT(rh, remaining);
-    }
-  }
-}
-
 /* ---- helpers to optionally prepend iifname match ---- */
 
 static void maybe_add_iifname(struct nlmsghdr *nlh, const char *iface)
@@ -396,6 +315,40 @@ int netlink_init(void)
   }
   g_seq = 0;
 
+  {
+    struct sockaddr_nl sa;
+    socklen_t slen = sizeof(sa);
+
+    memset(&sa, 0, sizeof(sa));
+    sa.nl_family = AF_NETLINK;
+    if (bind(g_fd, (const struct sockaddr *)&sa, sizeof(sa)) != 0) {
+      close(g_fd);
+      g_fd = -1;
+      return -1;
+    }
+    if (getsockname(g_fd, (struct sockaddr *)&sa, &slen) != 0) {
+      close(g_fd);
+      g_fd = -1;
+      return -1;
+    }
+    g_portid = sa.nl_pid;
+    {
+      int on = 1;
+      (void)setsockopt(g_fd, SOL_NETLINK, NETLINK_GET_STRICT_CHK, &on, sizeof(on));
+    }
+  }
+
+  /* --- delete table (fresh state, resets rule handle counter) --- */
+  memset(buf, 0, sizeof(buf));
+  nlh = msg_start(buf);
+  msg_set(nlh, NFT_MSG_DELTABLE, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
+  put_attr(nlh, NFTA_TABLE_NAME, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
+  {
+    int saved = errno;
+    (void)nl_talk(buf, nlh->nlmsg_len);
+    errno = saved;
+  }
+
   /* --- create table --- */
   memset(buf, 0, sizeof(buf));
   nlh = msg_start(buf);
@@ -403,7 +356,6 @@ int netlink_init(void)
   put_attr(nlh, NFTA_TABLE_NAME, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
 
   if (nl_talk(buf, nlh->nlmsg_len) != 0) {
-    /* EEXIST is fine — table already exists */
     if (errno != EEXIST) {
       close(g_fd);
       g_fd = -1;
@@ -414,7 +366,7 @@ int netlink_init(void)
   /* --- create chain --- */
   memset(buf, 0, sizeof(buf));
   nlh = msg_start(buf);
-  msg_set(nlh, NFT_MSG_NEWCHAIN, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE, AF_INET);
+  msg_set(nlh, NFT_MSG_NEWCHAIN, NLM_F_REQUEST | NLM_F_ACK, AF_INET);
   put_attr(nlh, NFTA_CHAIN_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
   put_attr(nlh, NFTA_CHAIN_NAME, (uint16_t) strlen(CHAIN_NAME) + 1, CHAIN_NAME);
   {
@@ -433,13 +385,13 @@ int netlink_init(void)
   }
 
   if (nl_talk(buf, nlh->nlmsg_len) != 0) {
-    if (errno != EEXIST) {
-      close(g_fd);
-      g_fd = -1;
-      return -1;
-    }
+    close(g_fd);
+    g_fd = -1;
+    return -1;
   }
 
+  g_next_handle = 1;
+  g_drop_handle = 0;
   return 0;
 }
 
@@ -486,7 +438,11 @@ int netlink_add_established_rule(const char *iface)
     end_nest(nlh, exprs);
   }
 
-  return nl_talk(buf, nlh->nlmsg_len);
+  if (nl_talk(buf, nlh->nlmsg_len) != 0) {
+    return -1;
+  }
+  g_next_handle++;
+  return 0;
 }
 
 int netlink_add_default_drop(uint16_t port, const char *iface)
@@ -521,7 +477,7 @@ int netlink_add_default_drop(uint16_t port, const char *iface)
   if (nl_talk(buf, nlh->nlmsg_len) != 0) {
     return -1;
   }
-  g_drop_handle = netlink_last_handle();
+  g_drop_handle = g_next_handle++;
   return 0;
 }
 
@@ -563,7 +519,7 @@ uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
     return 0;
   }
 
-  return netlink_last_handle();
+  return g_next_handle++;
 }
 
 int netlink_rule_delete(uint64_t handle)

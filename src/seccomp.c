@@ -13,6 +13,7 @@
 /* x86_64 syscall numbers */
 #define SYS_read 0
 #define SYS_write 1
+#define SYS_writev 20
 #define SYS_close 3
 #define SYS_mmap 9
 #define SYS_mprotect 10
@@ -31,6 +32,8 @@
 #define SYS_epoll_wait 232
 #define SYS_epoll_ctl 233
 #define SYS_getrandom 318
+#define SYS_epoll_pwait 281
+#define SYS_gettimeofday 96
 
 #define ALLOW(syscall) \
   BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, syscall, 0, 1), \
@@ -50,6 +53,7 @@ int install_seccomp(int foreground)
     /* allowed syscalls */
     ALLOW(SYS_read),
     ALLOW(SYS_write),
+    ALLOW(SYS_writev),
     ALLOW(SYS_close),
     ALLOW(SYS_mmap),
     ALLOW(SYS_mprotect),
@@ -58,6 +62,7 @@ int install_seccomp(int foreground)
     ALLOW(SYS_rt_sigaction),
     ALLOW(SYS_rt_sigprocmask),
     ALLOW(SYS_getpid),
+    ALLOW(SYS_gettimeofday),
     ALLOW(SYS_sendto),
     ALLOW(SYS_recvfrom),
     ALLOW(SYS_exit),
@@ -65,6 +70,7 @@ int install_seccomp(int foreground)
     ALLOW(SYS_futex),
     ALLOW(SYS_clock_gettime),
     ALLOW(SYS_epoll_wait),
+    ALLOW(SYS_epoll_pwait),
     ALLOW(SYS_epoll_ctl),
     ALLOW(SYS_exit_group),
     ALLOW(SYS_getrandom),
@@ -78,7 +84,7 @@ int install_seccomp(int foreground)
     .filter = filter,
   };
 
-  if (prctl(PR_SET_SECCOMP, SECCOMP_SET_MODE_FILTER, &prog) != 0) {
+  if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
     if (foreground)
       fprintf(stderr, "warning: seccomp filter not available: %s\n", strerror(errno));
     else
