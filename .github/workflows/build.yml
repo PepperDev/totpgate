@@ -66,12 +66,13 @@ jobs:
         run: |
           TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
           echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
-          KEY=$(curl -sL "https://musl.cc/SHA512SUMS" 2>/dev/null | sha256sum | cut -c1-16)
-          if [ -z "$KEY" ]; then
+          if SUMS=$(curl -sSfL --retry 3 --retry-delay 5 "https://musl.cc/SHA512SUMS" 2>/dev/null); then
+            KEY=$(echo "$SUMS" | sha256sum | cut -c1-16)
+          else
             # Fallback: hash Last-Modified headers
             DATES=""
             for tc in $TOOLCHAINS; do
-              date=$(curl -sIL "https://musl.cc/$tc.tgz" | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
+              date=$(curl -sSfIL --retry 3 --retry-delay 5 "https://musl.cc/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
               DATES="$DATES|$date"
             done
             KEY=$(echo "$DATES" | md5sum | cut -c1-16)
@@ -90,7 +91,7 @@ jobs:
           sudo mkdir -p /opt/musl
           for tc in ${{ steps.hash.outputs.toolchains }}; do
             echo "Downloading $tc..."
-            sudo curl -sL "https://musl.cc/$tc.tgz" | sudo tar xz -C /opt/musl
+            sudo curl -sSfL --retry 5 --retry-delay 10 --connect-timeout 30 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && sudo rm "/tmp/$tc.tgz"
           done
 
   build:
