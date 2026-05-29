@@ -415,6 +415,7 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   }
 
   if (netlink_init() != 0) {
+    fprintf(stderr, "error: netlink_init: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "netlink_init failed");
     return -1;
   }
@@ -426,12 +427,14 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   iface = cfg->iface[0] ? cfg->iface : NULL;
 
   if (netlink_add_established_rule(iface) != 0) {
+    fprintf(stderr, "error: netlink_add_established_rule: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "netlink_add_established_rule failed");
     daemon_cleanup(d);
     return -1;
   }
 
   if (netlink_add_default_drop(cfg->target_port, iface) != 0) {
+    fprintf(stderr, "error: netlink_add_default_drop: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "netlink_add_default_drop failed");
     daemon_cleanup(d);
     return -1;
@@ -439,6 +442,7 @@ int daemon_setup(struct daemon *d, struct config *cfg)
 
   d->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   if (d->epoll_fd < 0) {
+    fprintf(stderr, "error: epoll_create1: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "epoll_create1 failed");
     daemon_cleanup(d);
     return -1;
@@ -447,6 +451,7 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   for (i = 0; i < cfg->num_ports; i++) {
     d->udp_fds[i] = udp_open(&cfg->ports[i].addr, cfg->ports[i].addrlen);
     if (d->udp_fds[i] < 0) {
+      fprintf(stderr, "error: udp_open: %s\n", strerror(errno));
       log_msg(cfg, LOG_ERR, "udp_open failed");
       daemon_cleanup(d);
       return -1;
@@ -457,6 +462,7 @@ int daemon_setup(struct daemon *d, struct config *cfg)
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = d->udp_fds[i];
     if (epoll_ctl(d->epoll_fd, EPOLL_CTL_ADD, d->udp_fds[i], &ev) != 0) {
+      fprintf(stderr, "error: epoll_ctl ADD udp: %s\n", strerror(errno));
       log_msg(cfg, LOG_ERR, "epoll_ctl ADD udp failed");
       daemon_cleanup(d);
       return -1;
@@ -470,6 +476,7 @@ int daemon_setup(struct daemon *d, struct config *cfg)
 
   d->signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
   if (d->signal_fd < 0) {
+    fprintf(stderr, "error: signalfd: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "signalfd failed");
     daemon_cleanup(d);
     return -1;
