@@ -66,18 +66,16 @@ jobs:
         run: |
           TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
           echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
-          if SUMS=$(curl -sSfL --retry 3 --retry-delay 5 "https://musl.cc/SHA512SUMS" 2>/dev/null); then
+          CURL="curl -sSfL --connect-timeout 10 --max-time 30 --retry 2 --retry-delay 3"
+          if SUMS=$($CURL "https://musl.cc/SHA512SUMS" 2>/dev/null); then
             KEY=$(echo "$SUMS" | sha256sum | cut -c1-16)
           else
             # Fallback: hash Last-Modified headers
-            DATES=""
-            for tc in $TOOLCHAINS; do
-              date=$(curl -sSfIL --retry 3 --retry-delay 5 "https://musl.cc/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
-              DATES="$DATES|$date"
-            done
-            KEY=$(echo "$DATES" | md5sum | cut -c1-16)
+            KEY=$(for tc in $TOOLCHAINS; do
+              $CURL -I "https://musl.cc/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | tr -d '\r'
+            done | md5sum | cut -c1-16)
           fi
-          echo "cache-key=musl-$KEY" >> "$GITHUB_OUTPUT"
+          echo "cache-key=musl-${KEY:-unknown}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@v4
         id: cache
@@ -91,7 +89,7 @@ jobs:
           sudo mkdir -p /opt/musl
           for tc in ${{ steps.hash.outputs.toolchains }}; do
             echo "Downloading $tc..."
-            sudo curl -sSfL --retry 5 --retry-delay 10 --connect-timeout 30 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && sudo rm "/tmp/$tc.tgz"
+            sudo curl -sSfL --retry 5 --retry-delay 10 --connect-timeout 30 --max-time 300 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && sudo rm "/tmp/$tc.tgz"
           done
 
   build:
