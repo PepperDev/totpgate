@@ -21,7 +21,7 @@ IP to open a TCP connection to a protected port for 30 seconds.
 The daemon `totpgated` accepts:
 
 | Argument | Default | Description |
-|---|---|---|---|
+|---|---|---|
 | `--port` | `2222` | UDP listen port. May be given multiple times with optional IP binding (`[ip:]port`, e.g. `0.0.0.0:2222` or `[::]:2222`). |
 | `--interface` | — | Network interface (e.g. `eth0`) to bind firewall `iifname` matches to. If omitted, rules match on any interface. |
 | `--target-port` | `22` | TCP application port to protect |
