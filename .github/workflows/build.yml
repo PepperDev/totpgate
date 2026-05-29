@@ -66,18 +66,24 @@ jobs:
         run: |
           TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
           echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
-          # Quick liveness probe — if musl.cc is unreachable, skip everything
-          if ! curl -sfLI --connect-timeout 5 --max-time 10 "https://musl.cc/" >/dev/null 2>&1; then
-            echo "musl.cc unreachable, skipping toolchain"
+          MIRROR_BASE="https://github.com/musl-cc/musl.cc/releases/download/v0.0.1"
+          # Try musl.cc first, then mirror fallback
+          if curl -sfLI --connect-timeout 5 --max-time 10 "https://musl.cc/" >/dev/null 2>&1; then
+            BASE="https://musl.cc"
+          elif curl -sfLI --connect-timeout 5 --max-time 10 "$MIRROR_BASE/SHA512SUMS" >/dev/null 2>&1; then
+            BASE="$MIRROR_BASE"
+          else
+            echo "musl.cc and mirror unreachable, skipping toolchain"
             echo "cache-key=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
           CURL="curl -sSfL --connect-timeout 10 --max-time 30 --retry 1"
-          if SUMS=$($CURL "https://musl.cc/SHA512SUMS" 2>/dev/null); then
+          if SUMS=$($CURL "$BASE/SHA512SUMS" 2>/dev/null); then
             KEY=$(echo "$SUMS" | sha256sum | cut -c1-16)
           else
             KEY=$(for tc in $TOOLCHAINS; do
-              $CURL -I "https://musl.cc/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | tr -d '\r'
+              $CURL -I "$BASE/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | tr -d '\r'
             done | md5sum | cut -c1-16)
           fi
           echo "cache-key=musl-${KEY:-unknown}" >> "$GITHUB_OUTPUT"
@@ -89,13 +95,13 @@ jobs:
           path: /opt/musl
           key: ${{ steps.hash.outputs.cache-key }}
 
-      - name: Download musl.cc toolchains
+      - name: Download musl toolchains
         if: steps.cache.outputs.cache-hit != 'true' && steps.hash.outputs.cache-key != ''
         run: |
           sudo mkdir -p /opt/musl
           for tc in ${{ steps.hash.outputs.toolchains }}; do
-            echo "Downloading $tc..."
-            curl -sfL --connect-timeout 10 --max-time 120 --retry 1 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && rm "/tmp/$tc.tgz"
+            echo "Downloading $tc from ${{ steps.hash.outputs.base }}..."
+            curl -sfL --connect-timeout 10 --max-time 120 --retry 1 "${{ steps.hash.outputs.base }}/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && rm "/tmp/$tc.tgz"
           done
 
   build:
@@ -157,7 +163,7 @@ jobs:
       - name: Check toolchain availability
         if: needs.musl-toolchain.outputs.cache-key == ''
         run: |
-          echo "musl.cc was unreachable during the musl-toolchain job."
+          echo "musl.cc and mirror were unreachable during the musl-toolchain job."
           echo "Cannot cross-compile without toolchains."
           exit 1
 
