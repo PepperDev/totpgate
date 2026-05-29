@@ -66,13 +66,19 @@ jobs:
         run: |
           TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
           echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
-          DATES=""
-          for tc in $TOOLCHAINS; do
-            date=$(curl -sIL "https://musl.cc/$tc.tgz" | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
-            DATES="$DATES|$date"
-          done
-          KEY=$(echo "$DATES" | md5sum | cut -c1-16)
-          echo "cache-key=musl-$KEY" >> "$GITHUB_OUTPUT"
+          # Try GitHub releases API; fall back to Last-Modified headers
+          TAG=$(curl -sL "https://api.github.com/repos/musl-cc/musl.cc/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+          if [ -n "$TAG" ]; then
+            echo "cache-key=musl-$TAG" >> "$GITHUB_OUTPUT"
+          else
+            DATES=""
+            for tc in $TOOLCHAINS; do
+              date=$(curl -sIL "https://musl.cc/$tc.tgz" | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
+              DATES="$DATES|$date"
+            done
+            KEY=$(echo "$DATES" | md5sum | cut -c1-16)
+            echo "cache-key=musl-$KEY" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/cache@v4
         id: cache
