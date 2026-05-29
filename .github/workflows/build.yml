@@ -56,35 +56,63 @@ jobs:
             ' coverage_output.txt
           } >> "$GITHUB_STEP_SUMMARY"
 
+  musl-toolchain:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.hash.outputs.cache-key }}
+    steps:
+      - name: Query musl.cc versions
+        id: hash
+        run: |
+          TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
+          echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
+          DATES=""
+          for tc in $TOOLCHAINS; do
+            date=$(curl -sIL "https://musl.cc/$tc.tgz" | grep -i "^last-modified:" | tail -1 | cut -d' ' -f2- | tr -d '\r')
+            DATES="$DATES|$date"
+          done
+          KEY=$(echo "$DATES" | md5sum | cut -c1-16)
+          echo "cache-key=musl-$KEY" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: /opt/musl
+          key: ${{ steps.hash.outputs.cache-key }}
+
+      - name: Download musl.cc toolchains
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo mkdir -p /opt/musl
+          for tc in ${{ steps.hash.outputs.toolchains }}; do
+            echo "Downloading $tc..."
+            sudo curl -sL "https://musl.cc/$tc.tgz" | sudo tar xz -C /opt/musl
+          done
+
   build:
-    needs: test
+    needs: [test, musl-toolchain]
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true')
     strategy:
       matrix:
         target:
           - name: x86_64
-            cc: gcc
-            pkg: gcc
+            musl_arch: x86_64-linux-musl
             deb_arch: amd64
             rpm_arch: x86_64
           - name: i686
-            cc: i686-linux-gnu-gcc
-            pkg: gcc-i686-linux-gnu
+            musl_arch: i686-linux-musl
             deb_arch: i386
             rpm_arch: i386
           - name: armhf
-            cc: arm-linux-gnueabihf-gcc
-            pkg: gcc-arm-linux-gnueabihf
+            musl_arch: arm-linux-musleabihf
             deb_arch: armhf
             rpm_arch: armv7hl
           - name: armv7
-            cc: arm-linux-gnueabi-gcc
-            pkg: gcc-arm-linux-gnueabi
+            musl_arch: arm-linux-musleabi
             deb_arch: armel
             rpm_arch: armv7hl
           - name: aarch64
-            cc: aarch64-linux-gnu-gcc
-            pkg: gcc-aarch64-linux-gnu
+            musl_arch: aarch64-linux-musl
             deb_arch: arm64
             rpm_arch: aarch64
     runs-on: ubuntu-latest
@@ -117,11 +145,17 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Install cross compiler
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.target.pkg }}
+      - name: Restore musl toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/musl
+          key: ${{ needs.musl-toolchain.outputs.cache-key }}
+          fail-on-cache-miss: true
 
       - name: Build
-        run: make CC="${{ matrix.target.cc }}" CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -fstack-protector-strong" LDFLAGS="-static -flto"
+        run: |
+          export PATH="/opt/musl/${{ matrix.target.musl_arch }}-cross/bin:$PATH"
+          make CC="${{ matrix.target.musl_arch }}-gcc" CFLAGS="-std=c99 -pedantic -pedantic-errors -O3 -Wall -Wextra -flto -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE" LDFLAGS="-static -flto"
 
       - name: Prepare dist
         run: |
