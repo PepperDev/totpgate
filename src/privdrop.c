@@ -11,8 +11,8 @@
 
 int drop_privileges(const char *user, const char *group, int foreground)
 {
-  struct passwd *pw;
-  struct group *gr;
+  const struct passwd *pw;
+  const struct group *gr;
   uid_t uid;
   gid_t gid;
 

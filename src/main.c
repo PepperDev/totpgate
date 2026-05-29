@@ -324,7 +324,7 @@ int parse_args(struct config *cfg, int argc, char *argv[])
   return 0;
 }
 
-static void log_msg(struct config *cfg, int priority, const char *msg)
+static void log_msg(const struct config *cfg, int priority, const char *msg)
 {
   if (cfg->foreground) {
     fprintf(stderr, "%s\n", msg);

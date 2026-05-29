@@ -274,7 +274,7 @@ static int nl_talk(const void *msg, size_t len)
 
   nlh = (struct nlmsghdr *)reply;
   if (nlh->nlmsg_type == NLMSG_ERROR) {
-    struct nlmsgerr *er = (struct nlmsgerr *)NLMSG_DATA(nlh);
+    const struct nlmsgerr *er = (const struct nlmsgerr *)NLMSG_DATA(nlh);
 
     if (er->error != 0) {
       errno = -er->error;
@@ -291,7 +291,6 @@ static int nl_parse_u64(const void *reply, size_t rlen, uint16_t want_type, uint
 {
   const struct nlmsghdr *nlh = (const struct nlmsghdr *)reply;
   size_t remaining;
-  struct nlattr *attr;
   int off;
 
   if (rlen < sizeof(*nlh)) {
@@ -301,8 +300,8 @@ static int nl_parse_u64(const void *reply, size_t rlen, uint16_t want_type, uint
   off = 0;
 
   while (off + (int)sizeof(struct nlattr) <= (int)remaining) {
-    attr = (struct nlattr *)((char *)NLMSG_DATA(nlh)
-                             + sizeof(struct nfgenmsg) + off);
+    struct nlattr *attr = (struct nlattr *)((char *)NLMSG_DATA(nlh)
+                                            + sizeof(struct nfgenmsg) + off);
     if (attr->nla_len < sizeof(struct nlattr)) {
       break;
     }
@@ -413,7 +412,7 @@ int netlink_add_established_rule(const char *iface)
   /* ct state bitmask: established(0x02) | related(0x04) = 0x06 */
   uint32_t mask_be = bs32(0x00000006U);
   uint32_t xor_be = 0;
-  uint8_t cmp_zero[4] = { 0, 0, 0, 0 };
+  const uint8_t cmp_zero[4] = { 0, 0, 0, 0 };
   uint32_t neq = NFT_CMP_NEQ;
 
   memset(buf, 0, sizeof(buf));
@@ -442,7 +441,7 @@ int netlink_add_default_drop(uint16_t port, const char *iface)
   char buf[BUF_SIZE];
   struct nlmsghdr *nlh;
   uint32_t reg = NFT_REG32_00;
-  uint8_t tcp_val[1] = { 6 };
+  const uint8_t tcp_val[1] = { 6 };
   uint32_t eq = NFT_CMP_EQ;
   uint32_t base = NFT_PAYLOAD_TRANSPORT_HEADER;
   uint16_t port_be = bs16(port);
@@ -478,9 +477,8 @@ int netlink_add_default_drop(uint16_t port, const char *iface)
     rh = (struct nlmsghdr *)reply;
     if (rlen >= sizeof(*rh)
         && rh->nlmsg_type == NLMSG_ERROR) {
-      struct nlmsgerr *er;
+      const struct nlmsgerr *er = (const struct nlmsgerr *)NLMSG_DATA(rh);
 
-      er = (struct nlmsgerr *)NLMSG_DATA(rh);
       if (er->error != 0) {
         return -1;
       }
@@ -541,9 +539,8 @@ uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
       return 0;
     }
     if (rh->nlmsg_type == NLMSG_ERROR) {
-      struct nlmsgerr *er;
+      const struct nlmsgerr *er = (const struct nlmsgerr *)NLMSG_DATA(rh);
 
-      er = (struct nlmsgerr *)NLMSG_DATA(rh);
       if (er->error != 0) {
         return 0;
       }

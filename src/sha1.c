@@ -7,7 +7,7 @@
 static void process_block(sha1_ctx_t *ctx)
 {
   uint32_t W[80];
-  uint32_t A, B, C, D, E, temp;
+  uint32_t A, B, C, D, E;
   int t;
 
   for (t = 0; t < 16; t++) {
@@ -41,7 +41,7 @@ static void process_block(sha1_ctx_t *ctx)
       f = B ^ C ^ D;
       k = 0xca62c1d6;
     }
-    temp = ROTL(A, 5) + f + E + k + W[t];
+    uint32_t temp = ROTL(A, 5) + f + E + k + W[t];
     E = D;
     D = C;
     C = ROTL(B, 30);

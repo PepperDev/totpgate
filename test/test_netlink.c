@@ -64,10 +64,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags, const struct sock
 ssize_t recv(int fd, void *buf, size_t len, int flags)
 {
   struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-  struct nfgenmsg *nfg;
-  struct nlattr *nla;
   uint32_t seq;
-  size_t off;
 
   (void)fd;
   (void)flags;
@@ -77,6 +74,9 @@ ssize_t recv(int fd, void *buf, size_t len, int flags)
 
   if (g_recv_mode == 1) {
     /* echo-style response with handle */
+    struct nfgenmsg *nfg;
+    struct nlattr *nla;
+    size_t off;
     nlh->nlmsg_len = (uint32_t) NLMSG_LENGTH(sizeof(struct nfgenmsg)) + NLA_HDRLEN + 8
         + NLA_HDRLEN + 10 + NLA_HDRLEN + 6;
     nlh->nlmsg_type = g_last_req.hdr.nlmsg_type;

@@ -28,6 +28,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y indent
       - run: make
       - run: make test
+      - run: make cppcheck
       - run: make style && git diff --exit-code
       - name: Coverage
         run: make coverage 2>&1 | tee coverage_output.txt

@@ -65,15 +65,13 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
 
 int udp_recv(int fd, unsigned char *buf, size_t len, uint32_t *src_ip, uint16_t *src_port)
 {
-  size_t copy_len;
-
   (void)fd;
   if (g_udp_recv_done) {
     return -1;
   }
   g_udp_recv_done = 1;
   if (g_udp_recv_len > 0) {
-    copy_len = (g_udp_recv_len < len) ? g_udp_recv_len : len;
+    size_t copy_len = (g_udp_recv_len < len) ? g_udp_recv_len : len;
     memcpy(buf, g_udp_recv_buf, copy_len);
     if (src_ip) {
       *src_ip = g_udp_recv_src_ip;

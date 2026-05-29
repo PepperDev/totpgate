@@ -40,10 +40,9 @@ int udp_recv(int fd, unsigned char *buf, size_t len, uint32_t *src_ip, uint16_t 
 {
   struct sockaddr_in addr;
   socklen_t addrlen = sizeof(addr);
-  ssize_t n;
 
   for (;;) {
-    n = recvfrom(fd, buf, len, 0, (struct sockaddr *)&addr, &addrlen);
+    ssize_t n = recvfrom(fd, buf, len, 0, (struct sockaddr *)&addr, &addrlen);
     if (n >= 0) {
       if (src_ip)
         *src_ip = addr.sin_addr.s_addr;

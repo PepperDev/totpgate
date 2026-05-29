@@ -26,6 +26,7 @@ totpgate codebase.  **Read this first** before making any changes.
 - **Dependency tracking**: `-MMD -MP` — `.d` files are generated and included.
 - **Binary destination**: `bin/`.
 - **Style**: `indent -linux -120 -i2 -nut` — run `make style` to auto-format.
+- **Static analysis**: `cppcheck` — run `make cppcheck` before committing.
 - **Braces**: always wrap blocks with braces, even single-line `if`/`for`/`while`/`do`.
 - **No third-party libraries**: implement everything from scratch (SHA1, HMAC,
   base32, base64, hex decode, netlink helpers, test framework, …).
@@ -131,6 +132,7 @@ performs better under heavy workload.  Key principles:
   - Line coverage ≥ 80 %.
   - `make test` passes.
   - `make style` has been run.
+  - `make cppcheck` passes.
   - `BUG_PREVENTION.md` has been reviewed for applicable items.
 - When **all** tasks in a section are done, **delete the entire section** from
   `TODO.md`.

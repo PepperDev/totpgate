@@ -38,7 +38,7 @@ CLIENT_TEST_BIN = $(BIN_DIR)/test_client
 
 OBJS      = $(MAIN_OBJS) $(LIB_OBJS)
 
-.PHONY: all daemon client test daemon-test netlink-test clean style coverage
+.PHONY: all daemon client test daemon-test netlink-test clean style coverage cppcheck
 
 all: daemon client
 
@@ -131,6 +131,17 @@ test: $(TEST_BIN) $(NL_BIN) $(DAEMON_TEST_BIN) $(CLIENT_TEST_BIN) $(PRIVDROP_BIN
 style:
 	indent -linux -l120 -i2 -nut $(SRC_DIR)/*.c $(SRC_DIR)/*.h $(TEST_DIR)/*.c $(TEST_DIR)/*.h 2>/dev/null || true
 	find $(SRC_DIR) $(TEST_DIR) -name '*~' -delete
+
+cppcheck:
+	cppcheck --enable=warning,style,performance,portability \
+	  --error-exitcode=1 \
+	  --suppress=missingIncludeSystem \
+	  --suppress=nullPointerOutOfMemory:test/* \
+	  --suppress=unusedStructMember:test/* \
+	  --inline-suppr \
+	  --check-level=exhaustive \
+	  -I $(SRC_DIR) --std=c99 \
+	  $(SRC_DIR) $(TEST_DIR)
 
 COVERAGE_DIR = $(OBJ_DIR)/coverage
 COVERAGE_CFLAGS = -fprofile-arcs -ftest-coverage -O0 -g
