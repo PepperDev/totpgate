@@ -18,6 +18,10 @@
 - [ ] **Endianness**: IP addresses, ports, and netlink attributes are network
       byte order; convert with `htonl`/`htons`/`ntohl`/`ntohs` where
       appropriate.
+- [ ] **No double-swap**: `s_addr` from `recvfrom`/`inet_addr` is already in
+      network byte order.  Do NOT pass through `bs32()`/`ntohl()` a second
+      time — that reverses the bytes on little-endian, producing wrong cmp
+      data.
 - [ ] **File descriptor leaks**: every `open`/`socket`/`accept` has a paired
       `close` on all error paths.
 - [ ] **Signal safety**: only async-signal-safe functions (see `signal-safety(7)`)

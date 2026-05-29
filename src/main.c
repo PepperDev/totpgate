@@ -630,7 +630,6 @@ int daemon_run(struct config *cfg)
   if (daemon_setup(&d, cfg) != 0) {
     return 1;
   }
-
   if (drop_privileges(cfg->user, cfg->group, cfg->foreground) != 0) {
     daemon_cleanup(&d);
     return 1;

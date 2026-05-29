@@ -11,6 +11,7 @@
 #include <linux/audit.h>
 
 /* x86_64 syscall numbers */
+#define SYS_poll 7
 #define SYS_read 0
 #define SYS_write 1
 #define SYS_writev 20
@@ -69,6 +70,7 @@ int install_seccomp(int foreground)
     ALLOW(SYS_arch_prctl),
     ALLOW(SYS_futex),
     ALLOW(SYS_clock_gettime),
+    ALLOW(SYS_poll),
     ALLOW(SYS_epoll_wait),
     ALLOW(SYS_epoll_pwait),
     ALLOW(SYS_epoll_ctl),

@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
@@ -23,6 +24,14 @@ static struct {
 
 static int g_fake_fd = 5;
 static int g_close_count;
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout)
+{
+  (void)fds;
+  (void)nfds;
+  (void)timeout;
+  return 0;
+}
 
 /* ---- syscall stubs ---- */
 
