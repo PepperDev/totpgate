@@ -159,6 +159,6 @@ new task.
 ## 8.  Privilege model
 
 - Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
-- If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `gcov`),
+- If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `cppcheck`, `gcov`),
   ask the user to install it rather than failing silently.
 - The daemon itself drops privileges early after binding the UDP socket.
