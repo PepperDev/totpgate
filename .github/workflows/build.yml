@@ -66,11 +66,16 @@ jobs:
         run: |
           TOOLCHAINS="x86_64-linux-musl-cross i686-linux-musl-cross arm-linux-musleabihf-cross arm-linux-musleabi-cross aarch64-linux-musl-cross"
           echo "toolchains=$TOOLCHAINS" >> "$GITHUB_OUTPUT"
-          CURL="curl -sSfL --connect-timeout 10 --max-time 30 --retry 2 --retry-delay 3"
+          # Quick liveness probe — if musl.cc is unreachable, skip everything
+          if ! curl -sfLI --connect-timeout 5 --max-time 10 "https://musl.cc/" >/dev/null 2>&1; then
+            echo "musl.cc unreachable, skipping toolchain"
+            echo "cache-key=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CURL="curl -sSfL --connect-timeout 10 --max-time 30 --retry 1"
           if SUMS=$($CURL "https://musl.cc/SHA512SUMS" 2>/dev/null); then
             KEY=$(echo "$SUMS" | sha256sum | cut -c1-16)
           else
-            # Fallback: hash Last-Modified headers
             KEY=$(for tc in $TOOLCHAINS; do
               $CURL -I "https://musl.cc/$tc.tgz" 2>/dev/null | grep -i "^last-modified:" | tail -1 | tr -d '\r'
             done | md5sum | cut -c1-16)
@@ -84,12 +89,12 @@ jobs:
           key: ${{ steps.hash.outputs.cache-key }}
 
       - name: Download musl.cc toolchains
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && steps.hash.outputs.cache-key != ''
         run: |
           sudo mkdir -p /opt/musl
           for tc in ${{ steps.hash.outputs.toolchains }}; do
             echo "Downloading $tc..."
-            sudo curl -sSfL --retry 5 --retry-delay 10 --connect-timeout 30 --max-time 300 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && sudo rm "/tmp/$tc.tgz"
+            curl -sfL --connect-timeout 10 --max-time 120 --retry 1 "https://musl.cc/$tc.tgz" -o "/tmp/$tc.tgz" && sudo tar xzf "/tmp/$tc.tgz" -C /opt/musl && rm "/tmp/$tc.tgz"
           done
 
   build:
@@ -148,7 +153,15 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Check toolchain availability
+        if: needs.musl-toolchain.outputs.cache-key == ''
+        run: |
+          echo "musl.cc was unreachable during the musl-toolchain job."
+          echo "Cannot cross-compile without toolchains."
+          exit 1
+
       - name: Restore musl toolchain
+        if: needs.musl-toolchain.outputs.cache-key != ''
         uses: actions/cache/restore@v4
         with:
           path: /opt/musl
