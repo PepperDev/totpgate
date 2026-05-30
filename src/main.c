@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <getopt.h>
 #include <errno.h>
 #include <time.h>
 #include <unistd.h>
@@ -21,8 +20,10 @@
 #include "privdrop.h"
 #include "seccomp.h"
 #include "netlink.h"
+#include "parse_opts.h"
 #include "udp.h"
 #include "auth.h"
+#include "totp.h"
 #include "ratelimit.h"
 
 #define TOTP_DIGITS 6
@@ -31,35 +32,12 @@
 #define DRIFT_AHEAD 1
 #define EPOLL_MAXEVENTS 64
 #define PRUNE_INTERVAL 5
-#define SECRET_FILE_MAX 4096
-#define MAX_PORTS 8
 #define MAX_DYNAMIC_RULES 256
 
 struct dynamic_rule {
   uint64_t handle;
   time_t expiry;
   int active;
-};
-
-struct listen_addr {
-  struct sockaddr_storage addr;
-  socklen_t addrlen;
-};
-
-struct config {
-  struct listen_addr ports[MAX_PORTS];
-  int num_ports;
-  uint16_t target_port;
-  unsigned char secret[256];
-  size_t secret_len;
-  uint32_t timeout;
-  char user[32];
-  char group[32];
-  char iface[IFNAMSIZ];
-  char secret_file[SECRET_FILE_MAX];
-  int foreground;
-  int test_mode;
-  struct rate_limit_cfg rate_limit;
 };
 
 struct daemon {
@@ -73,265 +51,6 @@ struct daemon {
   struct dynamic_rule rules[MAX_DYNAMIC_RULES];
   int num_rules;
 };
-
-static int parse_listen_addr(const char *s, struct listen_addr *la)
-{
-  char node[256];
-  const char *port_str;
-  struct addrinfo hints, *res;
-  int ret;
-
-  if (s[0] == '[') {
-    const char *close = strchr(s, ']');
-    if (!close || *(close + 1) != ':')
-      return -1;
-    {
-      size_t nlen = (size_t)(close - s - 1);
-      if (nlen >= sizeof(node))
-        return -1;
-      memcpy(node, s + 1, nlen);
-      node[nlen] = '\0';
-    }
-    port_str = close + 2;
-  } else {
-    const char *colon = strrchr(s, ':');
-    if (colon) {
-      size_t nlen = (size_t)(colon - s);
-      if (nlen >= sizeof(node))
-        return -1;
-      memcpy(node, s, nlen);
-      node[nlen] = '\0';
-      port_str = colon + 1;
-    } else {
-      node[0] = '\0';
-      port_str = s;
-    }
-  }
-
-  {
-    long val = atol(port_str);
-    if (val < 1 || val > 65535)
-      return -1;
-  }
-
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_socktype = SOCK_DGRAM;
-
-  if (node[0] != '\0') {
-    hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-    hints.ai_family = AF_UNSPEC;
-  } else {
-    hints.ai_flags = AI_PASSIVE;
-    hints.ai_family = AF_INET;
-  }
-
-  ret = getaddrinfo(node[0] ? node : NULL, port_str, &hints, &res);
-  if (ret != 0)
-    return -1;
-
-  if ((size_t)res->ai_addrlen > sizeof(la->addr)) {
-    freeaddrinfo(res);
-    return -1;
-  }
-
-  memcpy(&la->addr, res->ai_addr, res->ai_addrlen);
-  la->addrlen = res->ai_addrlen;
-  freeaddrinfo(res);
-  return 0;
-}
-
-static void print_usage(const char *prog)
-{
-  fprintf(stderr,
-          "Usage: %s --secret <secret> [options]\n"
-          "\n"
-          "Options:\n"
-          "  --port <[ip:]port>      UDP listen port (default: 2222)\n"
-          "                          May be given multiple times with optional\n"
-          "                          IP binding (e.g. 0.0.0.0:2222, [::]:2222)\n"
-          "  --target-port <port>    TCP application port to protect (default: 22)\n"
-          "  --secret <secret>       Shared secret (mutually exclusive with --secret-file)\n"
-          "                          (base32 by default; prefix with\n"
-          "                           hex: or b64: for other encodings)\n"
-          "  --secret-file <path>    Read secret from file (mutually exclusive with --secret)\n"
-          "  --timeout <seconds>     Rule lifetime (default: 30)\n"
-          "  --min-block <seconds>   Min rate-limit block duration (default: 300)\n"
-          "  --max-block <seconds>   Max rate-limit block duration (default: 86400)\n"
-          "  --rate-limit <n/window> Max fails per window (default: 5/60)\n"
-          "  --interface <name>      Network interface to bind firewall rules to\n"
-          "  --user <user>           Drop privileges to this user (default: nobody)\n"
-          "  --group <group>         Use this group after dropping privs (default: nogroup)\n"
-          "  --foreground            Log to stderr instead of syslog\n"
-          "  --help                  Show this help\n", prog);
-}
-
-int parse_args(struct config *cfg, int argc, char *argv[])
-{
-  static const struct option long_opts[] = {
-    {"port", required_argument, NULL, 'p'},
-    {"target-port", required_argument, NULL, 't'},
-    {"secret", required_argument, NULL, 's'},
-    {"secret-file", required_argument, NULL, 'S'},
-    {"timeout", required_argument, NULL, 'T'},
-    {"min-block", required_argument, NULL, 'b'},
-    {"max-block", required_argument, NULL, 'B'},
-    {"rate-limit", required_argument, NULL, 'r'},
-    {"interface", required_argument, NULL, 'i'},
-    {"user", required_argument, NULL, 'u'},
-    {"group", required_argument, NULL, 'g'},
-    {"foreground", no_argument, NULL, 'f'},
-    {"help", no_argument, NULL, 'h'},
-    {NULL, 0, NULL, 0}
-  };
-  int opt;
-  int secret_given = 0;
-
-  while ((opt = getopt_long(argc, argv, "p:t:s:S:T:b:B:r:i:u:g:fh", long_opts, NULL)) != -1) {
-    switch (opt) {
-    case 'p':{
-        if (cfg->num_ports >= MAX_PORTS) {
-          fprintf(stderr, "error: too many --port arguments (max %d)\n", MAX_PORTS);
-          return -1;
-        }
-        if (parse_listen_addr(optarg, &cfg->ports[cfg->num_ports]) != 0) {
-          fprintf(stderr, "error: invalid --port '%s'\n", optarg);
-          return -1;
-        }
-        cfg->num_ports++;
-        break;
-      }
-    case 't':{
-        long val = atol(optarg);
-        if (val < 1 || val > 65535) {
-          fprintf(stderr, "error: --target-port must be 1-65535\n");
-          return -1;
-        }
-        cfg->target_port = (uint16_t) val;
-        break;
-      }
-    case 's':{
-        if (cfg->secret_file[0] != '\0') {
-          fprintf(stderr, "error: --secret and --secret-file are mutually exclusive\n");
-          return -1;
-        }
-        size_t out_len = sizeof(cfg->secret);
-        enum secret_encoding enc;
-        if (secret_decode(optarg, cfg->secret, &out_len, &enc) != 0) {
-          fprintf(stderr, "error: invalid --secret encoding\n");
-          return -1;
-        }
-        cfg->secret_len = out_len;
-        secret_given = 1;
-        break;
-      }
-    case 'S':{
-        size_t len = strlen(optarg);
-        if (len >= sizeof(cfg->secret_file)) {
-          fprintf(stderr, "error: --secret-file path too long\n");
-          return -1;
-        }
-        if (secret_given) {
-          fprintf(stderr, "error: --secret-file and --secret are mutually exclusive\n");
-          return -1;
-        }
-        memcpy(cfg->secret_file, optarg, len + 1);
-        break;
-      }
-    case 'T':{
-        long val = atol(optarg);
-        if (val < 1 || val > 86400) {
-          fprintf(stderr, "error: --timeout must be 1-86400\n");
-          return -1;
-        }
-        cfg->timeout = (uint32_t) val;
-        break;
-      }
-    case 'b':{
-        long val = atol(optarg);
-        if (val < 1 || val > 86400) {
-          fprintf(stderr, "error: --min-block must be 1-86400\n");
-          return -1;
-        }
-        cfg->rate_limit.min_block = (uint32_t) val;
-        break;
-      }
-    case 'B':{
-        long val = atol(optarg);
-        if (val < 1 || val > 86400) {
-          fprintf(stderr, "error: --max-block must be 1-86400\n");
-          return -1;
-        }
-        cfg->rate_limit.max_block = (uint32_t) val;
-        break;
-      }
-    case 'r':{
-        int n = 0, w = 0;
-        if (sscanf(optarg, "%d/%d", &n, &w) != 2 || n < 1 || w < 1) {
-          fprintf(stderr, "error: --rate-limit must be <fails>/<window>\n");
-          return -1;
-        }
-        cfg->rate_limit.max_fails = (uint32_t) n;
-        cfg->rate_limit.window = (uint32_t) w;
-        break;
-      }
-    case 'i':{
-        size_t len = strlen(optarg);
-        if (len >= sizeof(cfg->iface)) {
-          fprintf(stderr, "error: --interface name too long\n");
-          return -1;
-        }
-        memcpy(cfg->iface, optarg, len + 1);
-        break;
-      }
-    case 'u':{
-        size_t len = strlen(optarg);
-        if (len >= sizeof(cfg->user)) {
-          fprintf(stderr, "error: --user too long\n");
-          return -1;
-        }
-        memcpy(cfg->user, optarg, len + 1);
-        break;
-      }
-    case 'g':{
-        size_t len = strlen(optarg);
-        if (len >= sizeof(cfg->group)) {
-          fprintf(stderr, "error: --group too long\n");
-          return -1;
-        }
-        memcpy(cfg->group, optarg, len + 1);
-        break;
-      }
-    case 'f':
-      cfg->foreground = 1;
-      break;
-    case 'h':
-      print_usage(argv[0]);
-      exit(0);
-    default:
-      print_usage(argv[0]);
-      return -1;
-    }
-  }
-
-  if (!secret_given && cfg->secret_file[0] == '\0') {
-    fprintf(stderr, "error: --secret or --secret-file is required\n");
-    print_usage(argv[0]);
-    return -1;
-  }
-
-  if (cfg->num_ports == 0) {
-    struct sockaddr_in *in = (struct sockaddr_in *)&cfg->ports[0].addr;
-
-    memset(in, 0, sizeof(*in));
-    in->sin_family = AF_INET;
-    in->sin_port = htons(2222);
-    in->sin_addr.s_addr = htonl(INADDR_ANY);
-    cfg->ports[0].addrlen = sizeof(*in);
-    cfg->num_ports = 1;
-  }
-
-  return 0;
-}
 
 static void log_msg(const struct config *cfg, int priority, const char *msg)
 {
@@ -421,43 +140,14 @@ void rule_prune(struct daemon *d, time_t now)
 
 void daemon_cleanup(struct daemon *d);
 
-int daemon_setup(struct daemon *d, struct config *cfg)
+static int daemon_setup_netlink(struct daemon *d, struct config *cfg)
 {
-  struct epoll_event ev;
-  sigset_t mask;
-  int i;
   const char *iface;
-
-  d->cfg = cfg;
-  for (i = 0; i < MAX_PORTS; i++)
-    d->udp_fds[i] = -1;
-  d->num_udp_fds = 0;
-  d->epoll_fd = -1;
-  d->signal_fd = -1;
-  {
-    struct timespec _ts;
-    clock_gettime(CLOCK_MONOTONIC, &_ts);
-    d->last_prune = _ts.tv_sec;
-  }
-  memset(d->rules, 0, sizeof(d->rules));
-  d->num_rules = 0;
-
-  {
-    struct rlimit rl;
-    d->maxevents = EPOLL_MAXEVENTS;
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-      if ((rlim_t) d->maxevents > rl.rlim_cur)
-        d->maxevents = (int)rl.rlim_cur;
-    }
-  }
-
-  if (!cfg->foreground) {
-    openlog("totpgated", LOG_PID | LOG_NDELAY, LOG_DAEMON);
-  }
 
   if (netlink_init() != 0) {
     fprintf(stderr, "error: netlink_init: %s\n", strerror(errno));
     log_msg(cfg, LOG_ERR, "netlink_init failed");
+    daemon_cleanup(d);
     return -1;
   }
 
@@ -487,6 +177,15 @@ int daemon_setup(struct daemon *d, struct config *cfg)
     daemon_cleanup(d);
     return -1;
   }
+
+  return 0;
+}
+
+static int daemon_setup_epoll(struct daemon *d, struct config *cfg)
+{
+  struct epoll_event ev;
+  int i;
+  sigset_t mask;
 
   d->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   if (d->epoll_fd < 0) {
@@ -542,13 +241,118 @@ int daemon_setup(struct daemon *d, struct config *cfg)
   return 0;
 }
 
+int daemon_setup(struct daemon *d, struct config *cfg)
+{
+  int i;
+
+  d->cfg = cfg;
+  for (i = 0; i < MAX_PORTS; i++)
+    d->udp_fds[i] = -1;
+  d->num_udp_fds = 0;
+  d->epoll_fd = -1;
+  d->signal_fd = -1;
+  {
+    struct timespec _ts;
+    clock_gettime(CLOCK_MONOTONIC, &_ts);
+    d->last_prune = _ts.tv_sec;
+  }
+  memset(d->rules, 0, sizeof(d->rules));
+  d->num_rules = 0;
+
+  {
+    struct rlimit rl;
+    d->maxevents = EPOLL_MAXEVENTS;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+      if ((rlim_t) d->maxevents > rl.rlim_cur)
+        d->maxevents = (int)rl.rlim_cur;
+    }
+  }
+
+  if (!cfg->foreground) {
+    openlog("totpgated", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+  }
+
+  if (daemon_setup_netlink(d, cfg) != 0)
+    return -1;
+
+  if (daemon_setup_epoll(d, cfg) != 0)
+    return -1;
+
+  return 0;
+}
+
+static int daemon_handle_signal(struct daemon *d)
+{
+  struct signalfd_siginfo ssi;
+  ssize_t n;
+
+  n = read(d->signal_fd, &ssi, sizeof(ssi));
+  if (n > 0) {
+    char logbuf[128];
+
+    snprintf(logbuf, sizeof(logbuf), "caught signal %u, shutting down", ssi.ssi_signo);
+    log_msg(d->cfg, LOG_INFO, logbuf);
+  }
+  return 1;
+}
+
+static void handle_one_packet(struct daemon *d, const unsigned char *buf, int len, uint32_t src_ip, uint16_t src_port)
+{
+  uint32_t token;
+  uint64_t rule_handle;
+  char logbuf[128];
+  time_t now;
+
+  now = time(NULL);
+
+  if (rate_limit_check(src_ip, now) != 0) {
+    log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
+    return;
+  }
+
+  if (auth_parse(buf, (size_t)len, &token) != 0) {
+    log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
+    rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+    return;
+  }
+
+  const struct totp_params tp = {
+    .src_ip = src_ip,
+    .now = now,
+    .digits = TOTP_DIGITS,
+    .step = TOTP_STEP,
+    .drift_behind = DRIFT_BEHIND,
+    .drift_ahead = DRIFT_AHEAD,
+    .out_counter = NULL,
+  };
+  if (auth_validate(d->cfg->secret, d->cfg->secret_len, token, &tp) != 0) {
+    log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
+    rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+    return;
+  }
+
+  rate_limit_success(src_ip);
+
+  rule_handle = netlink_rule_insert(src_ip, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
+  if (rule_handle == 0) {
+    log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
+    return;
+  }
+
+  rule_track(d, rule_handle, now + (time_t) d->cfg->timeout);
+
+  snprintf(logbuf, sizeof(logbuf),
+           "accepted from %u.%u.%u.%u:%u (handle %llu)",
+           (src_ip >> 0) & 0xff, (src_ip >> 8) & 0xff,
+           (src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff, (unsigned)src_port, (unsigned long long)rule_handle);
+  log_msg(d->cfg, LOG_INFO, logbuf);
+}
+
 int daemon_process(struct daemon *d)
 {
   struct epoll_event events[EPOLL_MAXEVENTS];
   int nfds;
   int i;
-  time_t now;
-  char logbuf[128];
 
   nfds = epoll_wait(d->epoll_fd, events, d->maxevents, 1000);
   if (nfds < 0) {
@@ -559,6 +363,8 @@ int daemon_process(struct daemon *d)
 
   {
     struct timespec _ts;
+    time_t now;
+
     clock_gettime(CLOCK_MONOTONIC, &_ts);
     now = time(NULL);
     if (_ts.tv_sec - d->last_prune >= PRUNE_INTERVAL) {
@@ -569,17 +375,8 @@ int daemon_process(struct daemon *d)
   }
 
   for (i = 0; i < nfds; i++) {
-    if (events[i].data.fd == d->signal_fd) {
-      struct signalfd_siginfo ssi;
-      ssize_t n;
-
-      n = read(d->signal_fd, &ssi, sizeof(ssi));
-      if (n > 0) {
-        snprintf(logbuf, sizeof(logbuf), "caught signal %u, shutting down", ssi.ssi_signo);
-        log_msg(d->cfg, LOG_INFO, logbuf);
-      }
-      return 1;
-    }
+    if (events[i].data.fd == d->signal_fd)
+      return daemon_handle_signal(d);
 
     {
       int udp_fd = -1;
@@ -597,46 +394,9 @@ int daemon_process(struct daemon *d)
         uint32_t src_ip = 0;
         uint16_t src_port = 0;
         int ret;
-        uint32_t token;
-        uint64_t rule_handle;
 
         while ((ret = udp_recv(udp_fd, buf, sizeof(buf), &src_ip, &src_port)) > 0) {
-          token = 0;
-
-          if (rate_limit_check(src_ip, now) != 0) {
-            log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
-            continue;
-          }
-
-          if (auth_parse(buf, (size_t)ret, &token) != 0) {
-            log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
-            rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
-            continue;
-          }
-
-          if (auth_validate
-              (d->cfg->secret, d->cfg->secret_len, token, src_ip, now,
-               TOTP_DIGITS, TOTP_STEP, DRIFT_BEHIND, DRIFT_AHEAD) != 0) {
-            log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
-            rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
-            continue;
-          }
-
-          rate_limit_success(src_ip);
-
-          rule_handle = netlink_rule_insert(src_ip, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
-          if (rule_handle == 0) {
-            log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
-            continue;
-          }
-
-          rule_track(d, rule_handle, now + (time_t) d->cfg->timeout);
-
-          snprintf(logbuf, sizeof(logbuf),
-                   "accepted from %u.%u.%u.%u:%u (handle %llu)",
-                   (src_ip >> 0) & 0xff, (src_ip >> 8) & 0xff,
-                   (src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff, (unsigned)src_port, (unsigned long long)rule_handle);
-          log_msg(d->cfg, LOG_INFO, logbuf);
+          handle_one_packet(d, buf, ret, src_ip, src_port);
         }
       }
     }
@@ -710,7 +470,7 @@ int main(int argc, char *argv[])
   memcpy(cfg.user, "nobody", 7);
   memcpy(cfg.group, "nogroup", 8);
 
-  if (parse_args(&cfg, argc, argv) != 0) {
+  if (parse_daemon_args(&cfg, argc, argv) != 0) {
     return 1;
   }
 

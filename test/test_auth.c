@@ -84,37 +84,45 @@ static void test_parse_trailing_rejected(void)
 
 static void test_validate_exact(void)
 {
+  const struct totp_params p = {
+    .src_ip = 0x01010101,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
   auth_replay_reset();
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x01010101, 59,
-                          8, 30, 0, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_drift_ahead(void)
 {
+  const struct totp_params p = {
+    .src_ip = 0x01010101,.now = 1111111081,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 1,
+  };
   auth_replay_reset();
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          14050471, 0x01010101, 1111111081,
-                          8, 30, 0, 1);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 14050471, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_drift_behind(void)
 {
+  const struct totp_params p = {
+    .src_ip = 0x01010101,.now = 89,.digits = 8,.step = 30,
+    .drift_behind = 1,.drift_ahead = 0,
+  };
   auth_replay_reset();
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x01010101, 89,
-                          8, 30, 1, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_wrong_token(void)
 {
+  const struct totp_params p = {
+    .src_ip = 0x01010101,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
   auth_replay_reset();
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          12345678, 0x01010101, 59,
-                          8, 30, 0, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 12345678, &p);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -122,56 +130,76 @@ static void test_validate_wrong_token(void)
 
 static void test_replay_same_window(void)
 {
+  const struct totp_params p = {
+    .src_ip = 0x02020202,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
   auth_replay_reset();
 
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x02020202, 59,
-                          8, 30, 0, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
 
-  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, 0x02020202, 59, 8, 30, 0, 0);
+  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_replay_different_ip(void)
 {
+  const struct totp_params p1 = {
+    .src_ip = 0x03030303,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
+  const struct totp_params p2 = {
+    .src_ip = 0x04040404,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
   auth_replay_reset();
 
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x03030303, 59,
-                          8, 30, 0, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p1);
   ASSERT_INT_EQ(ret, 0);
 
-  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, 0x04040404, 59, 8, 30, 0, 0);
+  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p2);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_replay_older_seq(void)
 {
+  const struct totp_params p59 = {
+    .src_ip = 0x05050505,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
+  const struct totp_params p29 = {
+    .src_ip = 0x05050505,.now = 29,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,
+  };
   auth_replay_reset();
 
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x05050505, 59,
-                          8, 30, 0, 0);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p59);
   ASSERT_INT_EQ(ret, 0);
 
   /* t=29 is in the same window as t=59 (counter=1 for both with 30s step) */
-  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, 0x05050505, 29, 8, 30, 0, 0);
+  ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p29);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_replay_newer_seq_ok(void)
 {
+  const struct totp_params p59 = {
+    .src_ip = 0x06060606,.now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 1,
+  };
+  const struct totp_params p1081 = {
+    .src_ip = 0x06060606,.now = 1111111081,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 1,
+  };
   auth_replay_reset();
 
   /* t=59 -> counter=1 */
-  int ret = auth_validate(g_secret, sizeof(g_secret),
-                          94287082, 0x06060606, 59,
-                          8, 30, 0, 1);
+  int ret = auth_validate(g_secret, sizeof(g_secret), 94287082, &p59);
   ASSERT_INT_EQ(ret, 0);
 
   /* t=1111111081 -> counter=37037036, with drift_ahead=1 matches counter=37037037 */
-  ret = auth_validate(g_secret, sizeof(g_secret), 14050471, 0x06060606, 1111111081, 8, 30, 0, 1);
+  ret = auth_validate(g_secret, sizeof(g_secret), 14050471, &p1081);
   ASSERT_INT_EQ(ret, 0);
 }
 

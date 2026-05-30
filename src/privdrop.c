@@ -27,44 +27,30 @@ static void log_msg(int foreground, int level, const char *fmt, ...)
     syslog(level, "%s", msg);
 }
 
-int drop_privileges(const char *user, const char *group, int foreground)
+static void lookup_user_group(const char *user, const char *group, int foreground, uid_t *uid, gid_t *gid)
 {
-  const struct passwd *pw;
-  const struct group *gr;
-  uid_t uid;
-  gid_t gid;
+  const struct passwd *pw = getpwnam(user);
 
-  /* Already unprivileged — nothing to drop.  Just set NO_NEW_PRIVS
-     so seccomp can install and return. */
-  if (getuid() != 0 && geteuid() != 0) {
-    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-    return 0;
-  }
-
-  pw = getpwnam(user);
   if (!pw) {
     log_msg(foreground, LOG_WARNING, "warning: drop_privileges: unknown user %s, trying uid 65534", user);
-    uid = 65534;
+    *uid = 65534;
   } else {
-    uid = pw->pw_uid;
+    *uid = pw->pw_uid;
   }
-  gr = getgrnam(group);
-  if (!gr) {
-    log_msg(foreground, LOG_WARNING, "warning: drop_privileges: unknown group %s, trying gid 65534", group);
-    gid = 65534;
-  } else {
-    gid = gr->gr_gid;
+  {
+    const struct group *gr = getgrnam(group);
+
+    if (!gr) {
+      log_msg(foreground, LOG_WARNING, "warning: drop_privileges: unknown group %s, trying gid 65534", group);
+      *gid = 65534;
+    } else {
+      *gid = gr->gr_gid;
+    }
   }
+}
 
-  /* Preserve capabilities across setuid so we can keep CAP_NET_ADMIN
-     for netlink (firewall) operations. */
-  if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
-    log_msg(foreground, LOG_WARNING, "warning: PR_SET_KEEPCAPS: %s", strerror(errno));
-  }
-
-  /* Try to drop privileges.  Operations that fail with EPERM are fine —
-     we may already be running unprivileged (e.g. under file capabilities). */
-
+static int drop_ids(gid_t gid, uid_t uid, int foreground)
+{
   if (setgroups(1, &gid) != 0) {
     if (errno != EPERM) {
       log_msg(foreground, LOG_ERR, "error: drop_privileges: setgroups: %s", strerror(errno));
@@ -83,6 +69,33 @@ int drop_privileges(const char *user, const char *group, int foreground)
       return -1;
     }
   }
+  return 0;
+}
+
+int drop_privileges(const char *user, const char *group, int foreground)
+{
+  uid_t uid;
+  gid_t gid;
+
+  /* Already unprivileged — nothing to drop.  Just set NO_NEW_PRIVS
+     so seccomp can install and return. */
+  if (getuid() != 0 && geteuid() != 0) {
+    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    return 0;
+  }
+
+  lookup_user_group(user, group, foreground, &uid, &gid);
+
+  /* Preserve capabilities across setuid so we can keep CAP_NET_ADMIN
+     for netlink (firewall) operations. */
+  if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
+    log_msg(foreground, LOG_WARNING, "warning: PR_SET_KEEPCAPS: %s", strerror(errno));
+  }
+
+  /* Try to drop privileges.  Operations that fail with EPERM are fine —
+     we may already be running unprivileged (e.g. under file capabilities). */
+  if (drop_ids(gid, uid, foreground) != 0)
+    return -1;
 
   /* Re-enable CAP_NET_ADMIN in the effective set; after setuid()
      the kernel clears effective capabilities even with KEEPCAPS. */

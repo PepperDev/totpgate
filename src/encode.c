@@ -87,6 +87,64 @@ static const unsigned char b32_tab[9] = {
   [0] = 0,[2] = 1,[4] = 2,[5] = 3,[7] = 4,[8] = 5,
 };
 
+struct b32_group {
+  int vals[8];
+  int m;
+  int n;
+};
+
+static void b32_fill_rest(int vals[8], int start)
+{
+  int j;
+  for (j = start; j < 8; j++)
+    vals[j] = 0;
+}
+
+static int b32_skip_padding(const char *in, size_t in_len, size_t *pos, int vals[8], int start)
+{
+  int j;
+  for (j = start; j < 8; j++) {
+    if (*pos < in_len && in[*pos] != '=')
+      return -1;
+    vals[j] = 0;
+    (*pos)++;
+  }
+  return 0;
+}
+
+static int b32_read_group(const char *in, size_t in_len, size_t *pos, struct b32_group *g)
+{
+  int j;
+
+  for (j = 0; j < 8; j++) {
+    if (*pos >= in_len) {
+      g->m = j;
+      g->n = b32_tab[g->m];
+      if (g->n == 0)
+        return -1;
+      b32_fill_rest(g->vals, j);
+      return 0;
+    }
+    int v = b32_val(in[*pos]);
+    if (v == -2) {
+      g->m = j;
+      g->n = b32_tab[g->m];
+      if (g->n == 0)
+        return -1;
+      if (b32_skip_padding(in, in_len, pos, g->vals, j) != 0)
+        return -1;
+      return 0;
+    }
+    if (v < 0)
+      return -1;
+    g->vals[j] = v;
+    (*pos)++;
+  }
+  g->m = 8;
+  g->n = 5;
+  return 0;
+}
+
 static int base32_decode(const char *in, size_t in_len, unsigned char *out, size_t *out_len)
 {
   size_t max = *out_len;
@@ -99,62 +157,28 @@ static int base32_decode(const char *in, size_t in_len, unsigned char *out, size
   }
 
   while (i < in_len) {
-    int vals[8];
-    int j;
-    int n;
-    int m;
-    unsigned long bits;
+    struct b32_group g;
 
-    for (j = 0; j < 8; j++) {
-      if (i >= in_len) {
-        m = j;
-        n = b32_tab[m];
-        if (n == 0)
-          return -1;
-        for (; j < 8; j++)
-          vals[j] = 0;
-        goto emit;
-      }
-      int v = b32_val(in[i]);
-      if (v == -2) {
-        m = j;
-        n = b32_tab[m];
-        if (n == 0)
-          return -1;
-        for (; j < 8; j++) {
-          if (i < in_len && in[i] != '=')
-            return -1;
-          vals[j] = 0;
-          i++;
-        }
-        goto emit;
-      }
-      if (v < 0)
-        return -1;
-      vals[j] = v;
-      i++;
-    }
-    m = 8;
-    n = 5;
-
- emit:
-    if (pos + n > max)
+    if (b32_read_group(in, in_len, &i, &g) != 0)
       return -1;
 
-    bits = 0;
-    for (j = 0; j < 8; j++) {
-      bits = (bits << 5) | (unsigned)(vals[j] & 0x1f);
-    }
+    if (pos + g.n > max)
+      return -1;
 
-    /* validate unused trailing bits in partial group */
-    if (m < 8) {
-      int leftover = m * 5 - n * 8;
-      if ((vals[m - 1] & ((1 << leftover) - 1)) != 0)
-        return -1;
-    }
+    {
+      unsigned long bits = 0;
+      int j;
+      for (j = 0; j < 8; j++)
+        bits = (bits << 5) | (unsigned)(g.vals[j] & 0x1f);
 
-    for (j = 0; j < n; j++) {
-      out[pos++] = (unsigned char)(bits >> (32 - j * 8));
+      if (g.m < 8) {
+        int leftover = g.m * 5 - g.n * 8;
+        if ((g.vals[g.m - 1] & ((1 << leftover) - 1)) != 0)
+          return -1;
+      }
+
+      for (j = 0; j < g.n; j++)
+        out[pos++] = (unsigned char)(bits >> (32 - j * 8));
     }
   }
 
@@ -164,6 +188,60 @@ static int base32_decode(const char *in, size_t in_len, unsigned char *out, size
 
 /* base64_decode output bytes per group of 4 input chars */
 #define B64_GROUP(n)  (((n) * 3) / 4)
+
+struct b64_group {
+  int vals[4];
+  int n;
+};
+
+static void b64_fill_rest(int vals[4], int start)
+{
+  int j;
+  for (j = start; j < 4; j++)
+    vals[j] = 0;
+}
+
+static int b64_skip_padding(const char *in, size_t in_len, size_t *pos, int vals[4], int start)
+{
+  int j;
+  for (j = start; j < 4; j++) {
+    if (*pos < in_len && in[*pos] != '=')
+      return -1;
+    vals[j] = 0;
+    (*pos)++;
+  }
+  return 0;
+}
+
+static int b64_read_group(const char *in, size_t in_len, size_t *pos, struct b64_group *g)
+{
+  int j;
+
+  for (j = 0; j < 4; j++) {
+    if (*pos >= in_len) {
+      g->n = B64_GROUP(j);
+      if (g->n == 0)
+        return -1;
+      b64_fill_rest(g->vals, j);
+      return 0;
+    }
+    int v = b64_val(in[*pos]);
+    if (v == -2) {
+      g->n = B64_GROUP(j);
+      if (g->n == 0)
+        return -1;
+      if (b64_skip_padding(in, in_len, pos, g->vals, j) != 0)
+        return -1;
+      return 0;
+    }
+    if (v < 0)
+      return -1;
+    g->vals[j] = v;
+    (*pos)++;
+  }
+  g->n = 3;
+  return 0;
+}
 
 static int base64_decode(const char *in, size_t in_len, unsigned char *out, size_t *out_len)
 {
@@ -177,51 +255,22 @@ static int base64_decode(const char *in, size_t in_len, unsigned char *out, size
   }
 
   while (i < in_len) {
-    int vals[4];
-    int j;
-    int n;
-    unsigned long bits;
+    struct b64_group g;
 
-    for (j = 0; j < 4; j++) {
-      if (i >= in_len) {
-        n = B64_GROUP(j);
-        if (n == 0)
-          return -1;
-        for (; j < 4; j++)
-          vals[j] = 0;
-        goto emit64;
-      }
-      int v = b64_val(in[i]);
-      if (v == -2) {
-        n = B64_GROUP(j);
-        if (n == 0)
-          return -1;
-        for (; j < 4; j++) {
-          if (i < in_len && in[i] != '=')
-            return -1;
-          vals[j] = 0;
-          i++;
-        }
-        goto emit64;
-      }
-      if (v < 0)
-        return -1;
-      vals[j] = v;
-      i++;
-    }
-    n = 3;
-
- emit64:
-    if (pos + n > max)
+    if (b64_read_group(in, in_len, &i, &g) != 0)
       return -1;
 
-    bits = 0;
-    for (j = 0; j < 4; j++) {
-      bits = (bits << 6) | (unsigned)(vals[j] & 0x3f);
-    }
+    if (pos + g.n > max)
+      return -1;
 
-    for (j = 0; j < n; j++) {
-      out[pos++] = (unsigned char)(bits >> (16 - j * 8));
+    {
+      unsigned long bits = 0;
+      int j;
+      for (j = 0; j < 4; j++)
+        bits = (bits << 6) | (unsigned)(g.vals[j] & 0x3f);
+
+      for (j = 0; j < g.n; j++)
+        out[pos++] = (unsigned char)(bits >> (16 - j * 8));
     }
   }
 
@@ -231,13 +280,36 @@ static int base64_decode(const char *in, size_t in_len, unsigned char *out, size
 
 /* ---- public API ---- */
 
+static int try_hex(const char *input, size_t len, unsigned char *out, size_t *out_len, enum secret_encoding *encoding)
+{
+  if (len < 4 || input[0] != 'h' || input[1] != 'e' || input[2] != 'x' || input[3] != ':')
+    return -1;
+  *encoding = SECRET_HEX;
+  return hex_decode(input + 4, len - 4, out, out_len);
+}
+
+static int try_base64(const char *input, size_t len, unsigned char *out, size_t *out_len,
+                      enum secret_encoding *encoding)
+{
+  if (len < 4 || input[0] != 'b' || input[1] != '6' || input[2] != '4' || input[3] != ':')
+    return -1;
+  *encoding = SECRET_BASE64;
+  return base64_decode(input + 4, len - 4, out, out_len);
+}
+
+static int try_base32(const char *input, size_t len, unsigned char *out, size_t *out_len,
+                      enum secret_encoding *encoding)
+{
+  *encoding = SECRET_BASE32;
+  return base32_decode(input, len, out, out_len);
+}
+
 int secret_decode(const char *input, unsigned char *out, size_t *out_len, enum secret_encoding *encoding)
 {
   size_t len;
 
-  if (input == NULL || out == NULL || out_len == NULL || encoding == NULL) {
+  if (input == NULL || out == NULL || out_len == NULL || encoding == NULL)
     return -1;
-  }
 
   len = strlen(input);
   if (len == 0) {
@@ -246,16 +318,9 @@ int secret_decode(const char *input, unsigned char *out, size_t *out_len, enum s
     return 0;
   }
 
-  if (len >= 4 && input[0] == 'h' && input[1] == 'e' && input[2] == 'x' && input[3] == ':') {
-    *encoding = SECRET_HEX;
-    return hex_decode(input + 4, len - 4, out, out_len);
-  }
-
-  if (len >= 4 && input[0] == 'b' && input[1] == '6' && input[2] == '4' && input[3] == ':') {
-    *encoding = SECRET_BASE64;
-    return base64_decode(input + 4, len - 4, out, out_len);
-  }
-
-  *encoding = SECRET_BASE32;
-  return base32_decode(input, len, out, out_len);
+  if (try_hex(input, len, out, out_len, encoding) == 0)
+    return 0;
+  if (try_base64(input, len, out, out_len, encoding) == 0)
+    return 0;
+  return try_base32(input, len, out, out_len, encoding);
 }

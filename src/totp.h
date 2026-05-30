@@ -5,10 +5,18 @@
 #include <stdint.h>
 #include <time.h>
 
+struct totp_params {
+  uint32_t src_ip;
+  time_t now;
+  int digits;
+  int step;
+  int drift_behind;
+  int drift_ahead;
+  uint64_t *out_counter;
+};
+
 uint32_t totp_generate(const unsigned char *secret, size_t secret_len, uint64_t counter, int digits);
 
-int totp_validate(const unsigned char *secret, size_t secret_len,
-                  uint32_t token, int digits, int step,
-                  int drift_behind, int drift_ahead, time_t now, uint64_t * out_counter);
+int totp_validate(const unsigned char *secret, size_t secret_len, uint32_t token, const struct totp_params *p);
 
 #endif

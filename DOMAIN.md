@@ -307,3 +307,18 @@ START
 | nftables | Modern Linux packet classification framework (replacement for iptables) |
 | Time step | Duration of each TOTP window (typically 30 s) |
 | Drift | Number of windows before/after the current one that are still accepted |
+
+---
+
+## 6.  Code quality exceptions (whitelist)
+
+The following functions are permitted to exceed lizard thresholds for
+legitimate reasons:
+
+| Function | File | Threshold exceeded | Justification |
+|---|---|---|---|
+| `process_block` | `src/sha1.c` | Nesting depth (4 > 3) | SHA-1 compression loop with 4-round if/else chain — algorithmic, not accidental complexity |
+| `sendto` | `test/test_netlink.c` | Parameter count (6 > 5) | POSIX `sendto(2)` stub — must match kernel ABI signature |
+
+New exceptions must be reviewed and justified here before adding to
+`make lizard`'s suppression logic.

@@ -43,7 +43,7 @@ SBINDIR   ?= $(DESTDIR)/usr/sbin
 BINDIR    ?= $(DESTDIR)/usr/bin
 MANDIR    ?= $(DESTDIR)/usr/share/man/man1
 
-.PHONY: all daemon client test daemon-test netlink-test clean style coverage cppcheck install
+.PHONY: all daemon client test daemon-test netlink-test clean style coverage cppcheck lizard install
 
 all: daemon client
 
@@ -149,7 +149,7 @@ style:
 	find $(SRC_DIR) $(TEST_DIR) -name '*~' -delete
 
 cppcheck:
-	cppcheck --enable=warning,style,performance,portability \
+	cppcheck --enable=all \
 	  --error-exitcode=1 \
 	  --suppress=missingIncludeSystem \
 	  --suppress=nullPointerOutOfMemory:test/* \
@@ -157,7 +157,21 @@ cppcheck:
 	  --inline-suppr \
 	  --check-level=exhaustive \
 	  -I $(SRC_DIR) --std=c99 \
-	  $(SRC_DIR) $(TEST_DIR)
+	   	  $(SRC_DIR) $(TEST_DIR)
+
+lizard:
+	@lizard --warnings_only -C 10 -L 80 -a 5 -T nloc=80 -T token_count=500 -ENS -i -1 \
+	  $(SRC_DIR) $(TEST_DIR) \
+	  | grep -v 'src/sha1.c.*process_block' \
+	  | grep -v 'test/test_netlink.c.*sendto' \
+	  | { lines=$$(cat); if [ -n "$$lines" ]; then echo "$$lines"; exit 1; fi; }
+	@lizard -Eoutside $(SRC_DIR)/*.c 2>/dev/null | awk '\
+	  /^NLOC[[:space:]]+Avg\.NLOC/ { in_summary = 1; next } \
+	  /^Total/ { in_summary = 0 } \
+	  in_summary && NF >= 6 && $$1 + 0 > 600 { \
+	    print "ERROR: file NLOC " $$1 + 0 " exceeds max 600: " $$NF; \
+	    exit 1; \
+	  }'
 
 COVERAGE_DIR = $(OBJ_DIR)/coverage
 COVERAGE_CFLAGS = -fprofile-arcs -ftest-coverage -O0 -g

@@ -20,10 +20,10 @@ a time-based one-time password, making each grant unique and replay-proof.
 ## Design
 
 ```
-┌──────────┐   UDP/TOTP    ┌──────────────┐   netlink    ┌──────────┐
-│  client  │ ────────────→ │  totpgated   │ ───────────→ │  kernel  │
+┌──────────┐   UDP/TOTP    ┌──────────────┐   netlink    ┌───────────┐
+│  client  │ ────────────→ │  totpgated   │ ───────────→ │  kernel   │
 │  (CLI)   │               │  (daemon)    │              │ (nftables)│
-└──────────┘               └──────────────┘              └──────────┘
+└──────────┘               └──────────────┘              └───────────┘
 ```
 
 1. **Client** sends a single UDP packet containing a TOTP value.

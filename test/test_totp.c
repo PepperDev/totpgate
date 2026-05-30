@@ -60,37 +60,52 @@ static void test_7_digits(void)
 /* Validate with no drift: should pass at exact time */
 static void test_validate_exact(void)
 {
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          94287082, 8, 30, 0, 0, 59, NULL);
+  const struct totp_params p = {
+    .now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,.out_counter = NULL,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_drift_ahead(void)
 {
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          14050471, 8, 30, 0, 1, 1111111081, NULL);
+  const struct totp_params p = {
+    .now = 1111111081,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 1,.out_counter = NULL,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 14050471, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_drift_behind(void)
 {
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          94287082, 8, 30, 1, 0, 89, NULL);
+  const struct totp_params p = {
+    .now = 89,.digits = 8,.step = 30,
+    .drift_behind = 1,.drift_ahead = 0,.out_counter = NULL,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_validate_wrong(void)
 {
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          12345678, 8, 30, 0, 0, 59, NULL);
+  const struct totp_params p = {
+    .now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,.out_counter = NULL,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 12345678, &p);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_validate_counter(void)
 {
   uint64_t counter = 0;
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          94287082, 8, 30, 0, 0, 59, &counter);
+  const struct totp_params p = {
+    .now = 59,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 0,.out_counter = &counter,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 94287082, &p);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)counter, 1);
 }
@@ -98,9 +113,11 @@ static void test_validate_counter(void)
 static void test_validate_counter_drift(void)
 {
   uint64_t counter = 0;
-  int ret = totp_validate(g_secret, sizeof(g_secret),
-                          14050471, 8, 30, 0, 1, 1111111081,
-                          &counter);
+  const struct totp_params p = {
+    .now = 1111111081,.digits = 8,.step = 30,
+    .drift_behind = 0,.drift_ahead = 1,.out_counter = &counter,
+  };
+  int ret = totp_validate(g_secret, sizeof(g_secret), 14050471, &p);
   ASSERT_INT_EQ(ret, 0);
   /* time 1111111081 → current = 1111111081/30 = 37037036,
      matching token is at d=+1 → counter = 37037037 */

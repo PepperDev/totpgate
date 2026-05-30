@@ -99,6 +99,15 @@ void auth_replay_prune(time_t now, time_t max_age)
 
 /* ---- packet parser ---- */
 
+static int validate_token_len(size_t token_len, size_t consumed, size_t total)
+{
+  if (token_len < MIN_TOKEN_DIGITS || token_len > MAX_TOKEN_DIGITS)
+    return -1;
+  if (consumed != total)
+    return -1;
+  return 0;
+}
+
 int auth_parse(const unsigned char *data, size_t len, uint32_t *token)
 {
   size_t i = 0;
@@ -116,10 +125,7 @@ int auth_parse(const unsigned char *data, size_t len, uint32_t *token)
     i++;
   }
 
-  if (token_len < MIN_TOKEN_DIGITS || token_len > MAX_TOKEN_DIGITS)
-    return -1;
-
-  if (i != len)
+  if (validate_token_len(token_len, i, len) != 0)
     return -1;
 
   if (token)
@@ -128,13 +134,12 @@ int auth_parse(const unsigned char *data, size_t len, uint32_t *token)
   return 0;
 }
 
-int auth_validate(const unsigned char *secret, size_t secret_len,
-                  uint32_t token, uint32_t src_ip, time_t now, int digits, int step, int drift_behind, int drift_ahead)
+int auth_validate(const unsigned char *secret, size_t secret_len, uint32_t token, const struct totp_params *p)
 {
-  uint64_t current = (uint64_t) now / (uint64_t) step;
+  uint64_t current = (uint64_t) p->now / (uint64_t) p->step;
   int d;
 
-  for (d = -drift_behind; d <= drift_ahead; d++) {
+  for (d = -p->drift_behind; d <= p->drift_ahead; d++) {
     uint64_t counter;
 
     if (d < 0 && current < (uint64_t) (-d))
@@ -142,10 +147,10 @@ int auth_validate(const unsigned char *secret, size_t secret_len,
 
     counter = (uint64_t) ((int64_t) current + d);
 
-    if (totp_generate(secret, secret_len, counter, digits) == token) {
-      if (auth_seen_before(counter, src_ip) != 0)
+    if (totp_generate(secret, secret_len, counter, p->digits) == token) {
+      if (auth_seen_before(counter, p->src_ip) != 0)
         return -1;
-      if (auth_record_seq(counter, src_ip) != 0)
+      if (auth_record_seq(counter, p->src_ip) != 0)
         return -1;
       return 0;
     }

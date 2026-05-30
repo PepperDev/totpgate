@@ -45,6 +45,19 @@ int rate_limit_check(uint32_t ip, time_t now)
   return 0;
 }
 
+static uint32_t calc_block_duration(uint32_t current, const struct rate_limit_cfg *cfg)
+{
+  if (current == 0)
+    return cfg->min_block;
+  {
+    uint32_t next = current * 2;
+
+    if (next > cfg->max_block)
+      return cfg->max_block;
+    return next;
+  }
+}
+
 void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
 {
   size_t idx = rate_idx(ip);
@@ -69,13 +82,7 @@ void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
 
       g_table[pos].fail_count++;
       if (g_table[pos].fail_count >= cfg->max_fails && now >= g_table[pos].block_until) {
-        if (g_table[pos].block_duration == 0) {
-          g_table[pos].block_duration = cfg->min_block;
-        } else {
-          g_table[pos].block_duration *= 2;
-          if (g_table[pos].block_duration > cfg->max_block)
-            g_table[pos].block_duration = cfg->max_block;
-        }
+        g_table[pos].block_duration = calc_block_duration(g_table[pos].block_duration, cfg);
         g_table[pos].block_until = now + (time_t) g_table[pos].block_duration;
       }
       return;

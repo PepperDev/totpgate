@@ -70,22 +70,24 @@ int getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen)
   return 0;
 }
 
+static ssize_t sendto_save(const void *buf, size_t len)
+{
+  if (len > sizeof(g_last_req.raw))
+    len = sizeof(g_last_req.raw);
+  memcpy(&g_last_req.hdr, buf, len < sizeof(struct nlmsghdr) ? len : sizeof(struct nlmsghdr));
+  if (len > 0)
+    memcpy(g_last_req.raw, buf, len);
+  g_last_req.len = len;
+  return (ssize_t) len;
+}
+
 ssize_t sendto(int fd, const void *buf, size_t len, int flags, const struct sockaddr *addr, socklen_t addrlen)
 {
   (void)fd;
   (void)flags;
   (void)addr;
   (void)addrlen;
-
-  if (len > sizeof(g_last_req.raw)) {
-    len = sizeof(g_last_req.raw);
-  }
-  memcpy(&g_last_req.hdr, buf, len < sizeof(struct nlmsghdr) ? len : sizeof(struct nlmsghdr));
-  if (len > 0) {
-    memcpy(g_last_req.raw, buf, len);
-  }
-  g_last_req.len = len;
-  return (ssize_t) len;
+  return sendto_save(buf, len);
 }
 
 ssize_t recv(int fd, void *buf, size_t len, int flags)

@@ -54,6 +54,54 @@ static int parse_host_port(const char *str, uint16_t *port, size_t *host_len)
   return 0;
 }
 
+static int handle_port_opt(struct client_cfg *cfg, const char *optarg)
+{
+  long val = atol(optarg);
+
+  if (val < 1 || val > 65535) {
+    fprintf(stderr, "error: --port must be 1-65535\n");
+    return -1;
+  }
+  cfg->port = (uint16_t) val;
+  return 0;
+}
+
+static int handle_secret_opt(struct client_cfg *cfg, const char *optarg)
+{
+  size_t out_len = sizeof(cfg->secret);
+  enum secret_encoding enc;
+
+  if (secret_decode(optarg, cfg->secret, &out_len, &enc) != 0) {
+    fprintf(stderr, "error: invalid --secret encoding\n");
+    return -1;
+  }
+  cfg->secret_len = out_len;
+  return 0;
+}
+
+static int parse_server_arg(struct client_cfg *cfg, const char *src)
+{
+  size_t slen = strlen(src);
+
+  {
+    uint16_t p;
+    size_t host_len;
+
+    if (parse_host_port(src, &p, &host_len)) {
+      cfg->port = p;
+      slen = host_len;
+    }
+  }
+
+  if (slen >= sizeof(cfg->server)) {
+    fprintf(stderr, "error: server name too long\n");
+    return -1;
+  }
+  memcpy(cfg->server, src, slen);
+  cfg->server[slen] = '\0';
+  return 0;
+}
+
 int parse_args(struct client_cfg *cfg, int argc, char *argv[])
 {
   static const struct option long_opts[] = {
@@ -70,26 +118,15 @@ int parse_args(struct client_cfg *cfg, int argc, char *argv[])
 
   while ((opt = getopt_long(argc, argv, "p:s:h", long_opts, NULL)) != -1) {
     switch (opt) {
-    case 'p':{
-        long val = atol(optarg);
-        if (val < 1 || val > 65535) {
-          fprintf(stderr, "error: --port must be 1-65535\n");
-          return -1;
-        }
-        cfg->port = (uint16_t) val;
-        break;
-      }
-    case 's':{
-        size_t out_len = sizeof(cfg->secret);
-        enum secret_encoding enc;
-        if (secret_decode(optarg, cfg->secret, &out_len, &enc) != 0) {
-          fprintf(stderr, "error: invalid --secret encoding\n");
-          return -1;
-        }
-        cfg->secret_len = out_len;
-        secret_given = 1;
-        break;
-      }
+    case 'p':
+      if (handle_port_opt(cfg, optarg) != 0)
+        return -1;
+      break;
+    case 's':
+      if (handle_secret_opt(cfg, optarg) != 0)
+        return -1;
+      secret_given = 1;
+      break;
     case 'h':
       print_usage(argv[0]);
       exit(0);
@@ -111,28 +148,8 @@ int parse_args(struct client_cfg *cfg, int argc, char *argv[])
     return -1;
   }
 
-  {
-    const char *src = argv[optind];
-    size_t slen;
-
-    {
-      uint16_t p;
-      size_t host_len;
-      if (parse_host_port(src, &p, &host_len)) {
-        cfg->port = p;
-        slen = host_len;
-      } else {
-        slen = strlen(src);
-      }
-    }
-
-    if (slen >= sizeof(cfg->server)) {
-      fprintf(stderr, "error: server name too long\n");
-      return -1;
-    }
-    memcpy(cfg->server, src, slen);
-    cfg->server[slen] = '\0';
-  }
+  if (parse_server_arg(cfg, argv[optind]) != 0)
+    return -1;
   optind++;
 
   return 0;

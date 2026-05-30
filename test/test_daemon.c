@@ -84,7 +84,7 @@ int daemon_setup(struct daemon *d, struct config *cfg);
 int daemon_process(struct daemon *d);
 void daemon_cleanup(struct daemon *d);
 int daemon_run(struct config *cfg);
-int parse_args(struct config *cfg, int argc, char *argv[]);
+int parse_daemon_args(struct config *cfg, int argc, char *argv[]);
 int drop_privileges(const char *user, const char *group, int foreground);
 int read_secret_file(const char *path, struct config *cfg);
 void rule_prune(struct daemon *d, time_t now);
@@ -113,7 +113,7 @@ extern int g_udp_recv_done;
 extern void mock_netlink_reset(void);
 extern void mock_udp_reset(void);
 
-/* ---- parse_args tests ---- */
+/* ---- parse_daemon_args tests ---- */
 
 static void test_parse_minimal(void)
 {
@@ -125,7 +125,7 @@ static void test_parse_minimal(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 3, argv);
+  int ret = parse_daemon_args(&cfg, 3, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 2222);
   ASSERT_INT_EQ(cfg.num_ports, 1);
@@ -148,7 +148,7 @@ static void test_parse_all_options(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 10, argv);
+  int ret = parse_daemon_args(&cfg, 10, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 9999);
   ASSERT_INT_EQ(cfg.num_ports, 1);
@@ -168,7 +168,7 @@ static void test_parse_missing_secret(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 1, argv);
+  int ret = parse_daemon_args(&cfg, 1, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -184,7 +184,7 @@ static void test_parse_bad_port(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -200,7 +200,7 @@ static void test_parse_bad_target_port(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -216,7 +216,7 @@ static void test_parse_bad_timeout(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -230,7 +230,7 @@ static void test_parse_invalid_secret(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 3, argv);
+  int ret = parse_daemon_args(&cfg, 3, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -246,7 +246,7 @@ static void test_parse_unknown_option(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 4, argv);
+  int ret = parse_daemon_args(&cfg, 4, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -262,7 +262,7 @@ static void test_parse_min_block(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)cfg.rate_limit.min_block, 600);
 }
@@ -279,7 +279,7 @@ static void test_parse_min_block_bad(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -295,7 +295,7 @@ static void test_parse_max_block(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)cfg.rate_limit.max_block, 7200);
 }
@@ -312,7 +312,7 @@ static void test_parse_rate_limit(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)cfg.rate_limit.max_fails, 10);
   ASSERT_INT_EQ((int)cfg.rate_limit.window, 120);
@@ -330,7 +330,7 @@ static void test_parse_rate_limit_bad(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -346,7 +346,7 @@ static void test_parse_user(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_STREQ(cfg.user, "daemon");
 }
@@ -363,7 +363,7 @@ static void test_parse_group(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_STREQ(cfg.group, "daemon");
 }
@@ -380,7 +380,7 @@ static void test_parse_secret_file(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 3, argv);
+  int ret = parse_daemon_args(&cfg, 3, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_STREQ(cfg.secret_file, "/etc/totpgated.key");
 }
@@ -402,7 +402,7 @@ static void test_parse_secret_file_too_long(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 3, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 3, argv), -1);
 }
 
 static void test_parse_secret_mutual_exclusive(void)
@@ -417,7 +417,7 @@ static void test_parse_secret_mutual_exclusive(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), -1);
 }
 
 static void test_read_secret_file_ok(void)
@@ -987,7 +987,7 @@ static void test_parse_interface(void)
   cfg.timeout = 30;
 
   optind = 0;
-  int ret = parse_args(&cfg, 5, argv);
+  int ret = parse_daemon_args(&cfg, 5, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_STREQ(cfg.iface, "eth0");
 }
@@ -1011,7 +1011,7 @@ static void test_parse_interface_too_long(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), -1);
 }
 
 static void test_parse_port_with_ipv4(void)
@@ -1026,7 +1026,7 @@ static void test_parse_port_with_ipv4(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), 0);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), 0);
   ASSERT_TRUE(cfg.num_ports == 1);
   ASSERT_TRUE(cfg.ports[0].addr.ss_family == AF_INET);
 }
@@ -1043,7 +1043,7 @@ static void test_parse_port_with_ipv6(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), 0);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), 0);
   ASSERT_TRUE(cfg.num_ports == 1);
   ASSERT_TRUE(cfg.ports[0].addr.ss_family == AF_INET6);
 }
@@ -1071,7 +1071,7 @@ static void test_parse_too_many_ports(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, argc, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, argc, argv), -1);
 
   for (i = 0; i < MAX_PORTS + 1; i++)
     free(argv[4 + 2 * i]);
@@ -1089,7 +1089,7 @@ static void test_parse_bad_ip_port(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), -1);
 }
 
 static void test_parse_port_ip_hostname_getaddrinfo_err(void)
@@ -1104,7 +1104,7 @@ static void test_parse_port_ip_hostname_getaddrinfo_err(void)
   cfg.timeout = 30;
 
   optind = 0;
-  ASSERT_INT_EQ(parse_args(&cfg, 5, argv), -1);
+  ASSERT_INT_EQ(parse_daemon_args(&cfg, 5, argv), -1);
 }
 
 /* ---- rule prune tests ---- */

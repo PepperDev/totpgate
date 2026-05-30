@@ -43,14 +43,12 @@ uint32_t totp_generate(const unsigned char *secret, size_t secret_len, uint64_t 
   return hotp(secret, secret_len, counter, digits);
 }
 
-int totp_validate(const unsigned char *secret, size_t secret_len,
-                  uint32_t token, int digits, int step,
-                  int drift_behind, int drift_ahead, time_t now, uint64_t *out_counter)
+int totp_validate(const unsigned char *secret, size_t secret_len, uint32_t token, const struct totp_params *p)
 {
-  uint64_t current = (uint64_t) now / (uint64_t) step;
+  uint64_t current = (uint64_t) p->now / (uint64_t) p->step;
   int d;
 
-  for (d = -drift_behind; d <= drift_ahead; d++) {
+  for (d = -p->drift_behind; d <= p->drift_ahead; d++) {
     uint64_t candidate;
 
     if (d < 0 && current < (uint64_t) (-d))
@@ -58,9 +56,9 @@ int totp_validate(const unsigned char *secret, size_t secret_len,
 
     candidate = (uint64_t) ((int64_t) current + d);
 
-    if (hotp(secret, secret_len, candidate, digits) == token) {
-      if (out_counter)
-        *out_counter = candidate;
+    if (hotp(secret, secret_len, candidate, p->digits) == token) {
+      if (p->out_counter)
+        *p->out_counter = candidate;
       return 0;
     }
   }

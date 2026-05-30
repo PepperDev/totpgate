@@ -27,6 +27,7 @@ totpgate codebase.  **Read this first** before making any changes.
 - **Binary destination**: `bin/`.
 - **Style**: `indent -linux -120 -i2 -nut` — run `make style` to auto-format.
 - **Static analysis**: `cppcheck` — run `make cppcheck` before committing.
+- **Code metrics**: `lizard` — run `make lizard` before committing. See rules in §9.
 - **Braces**: always wrap blocks with braces, even single-line `if`/`for`/`while`/`do`.
 - **No third-party libraries**: implement everything from scratch (SHA1, HMAC,
   base32, base64, hex decode, netlink helpers, test framework, …).
@@ -133,6 +134,7 @@ performs better under heavy workload.  Key principles:
   - `make test` passes.
   - `make style` has been run.
   - `make cppcheck` passes.
+  - `make lizard` passes (see §9 for thresholds).
   - `BUG_PREVENTION.md` has been reviewed for applicable items.
 - When **all** tasks in a section are done, **delete the entire section** from
   `TODO.md`.
@@ -161,4 +163,25 @@ new task.
 - Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
 - If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `cppcheck`, `gcov`),
   ask the user to install it rather than failing silently.
+  `lizard` is installed via pip (`sudo pip install --break-system-packages lizard`).
 - The daemon itself drops privileges early after binding the UDP socket.
+
+---
+
+## 9.  Code quality thresholds (lizard)
+
+`make lizard` enforces the following hard limits.  Values in parentheses are
+recommended targets; exceeding the hard limit causes the build to fail.
+
+| Metric | Hard limit | Recommended | Notes |
+|---|---|---|---|
+| LOC per file | 600 | 300 | Non-comment, non-blank lines of code; applies to `src/` only |
+| LOC per function | 80 | 40 | Non-comment, non-blank lines per function body |
+| Cyclomatic complexity | 10 | 6 | McCabe's cyclomatic complexity per function |
+| Tokens per function | 500 | 250 | Proxy for statement count via `-T token_count=` |
+| Nested control structures | 3 | — | `-ENS` extension in lizard |
+| Function parameter count | 5 | — | Number of formal parameters |
+| Cohesion & coupling | 1 public abstraction / file | — | Code review item: one public abstraction per file, low coupling, high cohesion |
+
+Exceptions are listed in `DOMAIN.md §6` and must be
+accompanied by a justification explaining why the exception is acceptable.

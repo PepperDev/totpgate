@@ -25,10 +25,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y indent cppcheck
+      - run: sudo apt-get update && sudo apt-get install -y indent cppcheck && sudo pip install --break-system-packages lizard
       - run: make
       - run: make test
       - run: make cppcheck
+      - run: make lizard
+      - name: Lizard summary
+        if: always()
+        run: |
+          {
+            echo '## Code Metrics (lizard)'
+            echo ''
+            echo '| Module | NLOC | AvgCCN | AvgToken | Functions |'
+            echo '|--------|-----:|-------:|---------:|----------:|'
+            lizard -Eoutside src/*.c 2>/dev/null \
+              | awk '/^NLOC[[:space:]]+Avg\.NLOC/ { s=1; next }
+                     /^Total/ { s=0 }
+                     /^=+$/ { if(s) s=0 }
+                     s && NF >= 5 { gsub(/^src\//,"",$NF); printf("| %s | %s | %s | %s | %d |\n",$NF,$1,$3,$4,$5) }'
+          } >> "$GITHUB_STEP_SUMMARY"
       - run: make style && git diff --exit-code
       - name: Coverage
         run: make coverage 2>&1 | tee coverage_output.txt
