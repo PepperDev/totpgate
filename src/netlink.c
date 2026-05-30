@@ -573,8 +573,8 @@ int netlink_add_established_rule(const char *iface)
   for (i = 0; i < 2; i++) {
     char buf[BUF_SIZE];
     struct nlmsghdr *nlh;
-    uint32_t mask_be = bs32(0x00000006U);
-    uint32_t xor_be = 0;
+    uint32_t mask_val = 0x00000006U;
+    uint32_t xor_val = 0;
     const uint8_t cmp_zero[4] = { 0, 0, 0, 0 };
 
     memset(buf, 0, sizeof(buf));
@@ -591,7 +591,7 @@ int netlink_add_established_rule(const char *iface)
       {
         const struct bitwise_regs br = { NFT_REG32_00, NFT_REG32_00 };
 
-        add_expr_bitwise(nlh, &br, 4, &mask_be, &xor_be);
+        add_expr_bitwise(nlh, &br, 4, &mask_val, &xor_val);
       }
       add_expr_cmp(nlh, NFT_REG32_00, NFT_CMP_NEQ, cmp_zero, 4);
       add_expr_immediate_verdict(nlh, NF_ACCEPT);
@@ -696,6 +696,7 @@ uint64_t netlink_rule_insert(const struct sockaddr_storage *src, uint16_t port, 
   msg_set(nlh, NFT_MSG_NEWRULE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_APPEND | NLM_F_CREATE, family);
   put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
   put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
+  put_be64(nlh, NFTA_RULE_HANDLE, g_next_handle);
 
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
