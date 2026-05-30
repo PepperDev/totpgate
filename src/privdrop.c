@@ -34,19 +34,27 @@ int drop_privileges(const char *user, const char *group, int foreground)
   uid_t uid;
   gid_t gid;
 
+  /* Already unprivileged — nothing to drop.  Just set NO_NEW_PRIVS
+     so seccomp can install and return. */
+  if (getuid() != 0 && geteuid() != 0) {
+    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    return 0;
+  }
+
   pw = getpwnam(user);
   if (!pw) {
-    log_msg(foreground, LOG_ERR, "error: drop_privileges: unknown user: %s", user);
-    return -1;
+    log_msg(foreground, LOG_WARNING, "warning: drop_privileges: unknown user %s, trying uid 65534", user);
+    uid = 65534;
+  } else {
+    uid = pw->pw_uid;
   }
   gr = getgrnam(group);
   if (!gr) {
-    log_msg(foreground, LOG_ERR, "error: drop_privileges: unknown group: %s", group);
-    return -1;
+    log_msg(foreground, LOG_WARNING, "warning: drop_privileges: unknown group %s, trying gid 65534", group);
+    gid = 65534;
+  } else {
+    gid = gr->gr_gid;
   }
-
-  uid = pw->pw_uid;
-  gid = gr->gr_gid;
 
   /* Preserve capabilities across setuid so we can keep CAP_NET_ADMIN
      for netlink (firewall) operations. */

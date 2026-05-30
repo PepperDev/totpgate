@@ -5,23 +5,6 @@
 
 ---
 
-## Robustness
-
-- [x] **Firewall cleanup on graceful exit**: catch SIGINT and delete the
-  totpgate table (or at least the default-drop rule and any dynamic rules)
-  so no stale firewall state remains if the daemon restarts.
-
-- [ ] **Fallback when nobody/nogroup not found**: if `getpwnam("nobody")` or
-  `getgrnam("nogroup")` fails, try numeric uid/gid (e.g. 65534) before
-  giving up.
-
-- [ ] **Skip privilege drop when already unprivileged**: if the process is
-  already running as non-root (uid != 0 && euid != 0), `drop_privileges()`
-  should be a no-op instead of requiring the user/group to exist in
-  passwd/group databases.
-
----
-
 ## Future improvements
 
 - **systemd service + packaging**: add `totpgated.service` to `.deb`/`.rpm`

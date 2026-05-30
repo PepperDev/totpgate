@@ -140,16 +140,11 @@ static void test_drop_non_root(void)
   reset_stubs();
   g_stub_uid = 1000;
   g_stub_euid = 1000;
-  /* non-root: setgroups/setgid/setuid return EPERM, which is tolerated */
-  g_stub_setgroups_fail = 1;
-  g_stub_setgid_fail = 1;
-  g_stub_setuid_fail = 1;
-  g_stub_errno = EPERM;
-
+  /* non-root: should return early without calling setgroups/setgid/setuid */
   ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), 0);
-  ASSERT_INT_EQ(g_stub_setgroups_called, 1);
-  ASSERT_INT_EQ(g_stub_setgid_called, 1);
-  ASSERT_INT_EQ(g_stub_setuid_called, 1);
+  ASSERT_INT_EQ(g_stub_setgroups_called, 0);
+  ASSERT_INT_EQ(g_stub_setgid_called, 0);
+  ASSERT_INT_EQ(g_stub_setuid_called, 0);
   ASSERT_INT_EQ(g_stub_prctl_called, 1);
 }
 
@@ -166,24 +161,30 @@ static void test_drop_root_success(void)
   ASSERT_INT_EQ(g_stub_prctl_called, 1);
 }
 
-static void test_drop_unknown_user(void)
+static void test_drop_unknown_user_fallback(void)
 {
   reset_stubs();
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_pwnam_fail = 1;
 
-  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
+  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), 0);
+  ASSERT_INT_EQ(g_stub_setgroups_called, 1);
+  ASSERT_INT_EQ(g_stub_setgid_called, 1);
+  ASSERT_INT_EQ(g_stub_setuid_called, 1);
 }
 
-static void test_drop_unknown_group(void)
+static void test_drop_unknown_group_fallback(void)
 {
   reset_stubs();
   g_stub_uid = 0;
   g_stub_euid = 0;
   g_stub_grnam_fail = 1;
 
-  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), -1);
+  ASSERT_INT_EQ(drop_privileges("nobody", "nogroup", 0), 0);
+  ASSERT_INT_EQ(g_stub_setgroups_called, 1);
+  ASSERT_INT_EQ(g_stub_setgid_called, 1);
+  ASSERT_INT_EQ(g_stub_setuid_called, 1);
 }
 
 static void test_drop_setgroups_fail(void)
@@ -238,8 +239,8 @@ TEST_GROUP(privdrop)
 {
 TEST(test_drop_non_root),
       TEST(test_drop_root_success),
-      TEST(test_drop_unknown_user),
-      TEST(test_drop_unknown_group),
+      TEST(test_drop_unknown_user_fallback),
+      TEST(test_drop_unknown_group_fallback),
       TEST(test_drop_setgroups_fail),
       TEST(test_drop_setgid_fail), TEST(test_drop_setuid_fail), TEST(test_drop_prctl_fail), END_TEST};
 
