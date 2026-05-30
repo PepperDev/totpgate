@@ -43,7 +43,7 @@ static void msg_ok(int foreground)
     syslog(LOG_INFO, "seccomp filter installed");
 }
 
-int install_seccomp(int foreground)
+static int apply_filter(void)
 {
   struct sock_filter filter[] = {
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, 4),
@@ -56,7 +56,12 @@ int install_seccomp(int foreground)
     ALLOW(SYS_write),
     ALLOW(SYS_writev),
     ALLOW(SYS_close),
+#ifdef SYS_mmap
     ALLOW(SYS_mmap),
+#endif
+#ifdef SYS_mmap2
+    ALLOW(SYS_mmap2),
+#endif
     ALLOW(SYS_mprotect),
     ALLOW(SYS_munmap),
     ALLOW(SYS_brk),
@@ -101,11 +106,15 @@ int install_seccomp(int foreground)
     .filter = filter,
   };
 
-  if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
+  return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog);
+}
+
+int install_seccomp(int foreground)
+{
+  if (apply_filter() != 0) {
     msg_fail(foreground);
     return -1;
   }
-
   msg_ok(foreground);
   return 0;
 }
