@@ -27,18 +27,31 @@
   BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, syscall, 0, 1), \
   BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW)
 
+static void msg_fail(int foreground)
+{
+  if (foreground)
+    fprintf(stderr, "warning: seccomp filter not available: %s\n", strerror(errno));
+  else
+    syslog(LOG_WARNING, "seccomp filter not available: %s", strerror(errno));
+}
+
+static void msg_ok(int foreground)
+{
+  if (foreground)
+    fprintf(stderr, "seccomp filter installed\n");
+  else
+    syslog(LOG_INFO, "seccomp filter installed");
+}
+
 int install_seccomp(int foreground)
 {
   struct sock_filter filter[] = {
-    /* validate architecture */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, 4),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_NATIVE, 1, 0),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL),
 
-    /* load syscall number */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, 0),
 
-    /* allowed syscalls */
     ALLOW(SYS_read),
     ALLOW(SYS_write),
     ALLOW(SYS_writev),
@@ -69,7 +82,9 @@ int install_seccomp(int foreground)
 #ifdef SYS_clock_gettime32
     ALLOW(SYS_clock_gettime32),
 #endif
+#ifdef SYS_poll
     ALLOW(SYS_poll),
+#endif
 #ifdef SYS_epoll_wait
     ALLOW(SYS_epoll_wait),
 #endif
@@ -78,7 +93,6 @@ int install_seccomp(int foreground)
     ALLOW(SYS_exit_group),
     ALLOW(SYS_getrandom),
 
-    /* deny everything else */
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL),
   };
 
@@ -88,16 +102,10 @@ int install_seccomp(int foreground)
   };
 
   if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
-    if (foreground)
-      fprintf(stderr, "warning: seccomp filter not available: %s\n", strerror(errno));
-    else
-      syslog(LOG_WARNING, "seccomp filter not available: %s", strerror(errno));
+    msg_fail(foreground);
     return -1;
   }
 
-  if (foreground)
-    fprintf(stderr, "seccomp filter installed\n");
-  else
-    syslog(LOG_INFO, "seccomp filter installed");
+  msg_ok(foreground);
   return 0;
 }
