@@ -28,7 +28,7 @@ encoding rules as \fB\-\-secret\fR. Mutually exclusive with
 UDP listen port. May be given multiple times to listen on different
 addresses or ports. When prefixed with an IP (e.g. \fB0.0.0.0:2222\fR,
 \fB[::]:2222\fR) the daemon binds only to that address; without a prefix
-it binds to all interfaces (default: 2222).
+it binds to both \fB0.0.0.0\fR and \fB[::]\fR (dual-stack, default: 2222).
 .TP
 \fB\-\-target-port\fR \fIport\fR
 TCP application port to protect. (default: 22)
@@ -70,9 +70,10 @@ The client sends a UDP datagram containing:
 .RE
 .P
 \fItoken\fR
-6 decimal digits (TOTP).  The daemon rejects any packet with trailing
-data.  The target port and rule lifetime are controlled exclusively by
-the daemon's \fB\-\-target-port\fR and \fB\-\-timeout\fR options.
+6 decimal digits (TOTP).  The daemon accepts 6 to 8 digits and rejects
+any packet with trailing data.  The target port and rule lifetime are
+controlled exclusively by the daemon's \fB\-\-target-port\fR and
+\fB\-\-timeout\fR options.
 .SH RATE LIMITING
 Per-IP failure tracking with exponential backoff. After the configured
 number of failures within the sliding window the IP is blocked for

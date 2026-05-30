@@ -77,21 +77,22 @@ Decoding rules:
 
 ### 2.2  `totp_token`
 
-- 6–8 decimal digits (configurable, default 6).
-- Computed as `Truncate(HMAC-SHA1(secret, time_counter)) mod 10^digits`.
+- 6 decimal digits (hardcoded in both client and daemon).
+- Computed as `Truncate(HMAC-SHA1(secret, time_counter)) mod 10^6`.
 - `time_counter = floor(UnixTime / time_step)`.
-- Default time step: 30 seconds.
+- Time step: 30 seconds (hardcoded).
 
 ### 2.3  `auth_window`
 
-| Parameter | Default | Description |
+| Parameter | Value | Description |
 |---|---|---|
-| `time_step` | 30 s | Width of each TOTP time window |
-| `drift_ahead` | 1 | How many future windows are accepted |
-| `drift_behind` | 1 | How many past windows are accepted |
+| `time_step` | 30 s | Width of each TOTP time window (hardcoded) |
+| `drift_ahead` | 1 | How many future windows are accepted (hardcoded) |
+| `drift_behind` | 1 | How many past windows are accepted (hardcoded) |
 
 The effective window size is `1 + drift_ahead + drift_behind` windows.
-A token is valid if it matches **any** window in the range.
+A token is valid if it matches **any** window in the range.  None of these
+parameters are user-configurable.
 
 ### 2.4  `auth_packet`
 
@@ -324,7 +325,6 @@ legitimate reasons:
 | Function | File | Threshold exceeded | Justification |
 |---|---|---|---|
 | `process_block` | `src/sha1.c` | Nesting depth (4 > 3) | SHA-1 compression loop with 4-round if/else chain — algorithmic, not accidental complexity |
-| `sendto` | `test/test_netlink.c` | Parameter count (6 > 5) | POSIX `sendto(2)` stub — must match kernel ABI signature |
 
 New exceptions must be reviewed and justified here before adding to
 `make lizard`'s suppression logic.

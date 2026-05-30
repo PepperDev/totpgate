@@ -22,9 +22,10 @@ Display usage and exit.
 .SH ARGUMENTS
 .TP
 \fIserver\fR[\fB:\fP\fIport\fR]
-IP address or hostname of the \fBtotpgated\fR daemon. When a port is
-appended after a colon (e.g. \fB192.168.1.1:3333\fR) it overrides the
-\fB\-\-port\fR option.
+IP address or hostname of the \fBtotpgated\fR daemon. IPv6 addresses
+must use bracket notation (e.g. \fB[::1]\fR or \fB[::1]:3333\fR).
+When a port is appended after a colon (e.g. \fB192.168.1.1:3333\fR)
+it overrides the \fB\-\-port\fR option.
 .SH EXIT STATUS
 .P
 \fBtotpgate\fR exits 0 on success, 1 on error.

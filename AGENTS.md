@@ -183,7 +183,7 @@ recommended targets; exceeding the hard limit causes the build to fail.
 | Metric | Hard limit | Recommended | Notes |
 |---|---|---|---|
 | LOC per file | 600 | 300 | Non-comment, non-blank lines of code; applies to `src/` only |
-| LOC per function | 80 | 40 | Non-comment, non-blank lines per function body |
+| LOC per function | 80 | 40 | Non-comment, non-blank lines per function body; applies to `src/` only |
 | Cyclomatic complexity | 10 | 6 | McCabe's cyclomatic complexity per function |
 | Tokens per function | 500 | 250 | Proxy for statement count via `-T token_count=` |
 | Nested control structures | 3 | — | `-ENS` extension in lizard |

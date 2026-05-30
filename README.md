@@ -69,12 +69,8 @@ make DESTDIR=/tmp/staging install
 and applies `cap_net_admin,cap_net_raw+ep` to the daemon binary (if
 run as root and `setcap` is available).  This lets the daemon manipulate
 nftables rules without running as root — it drops to an unprivileged
-user after binding the UDP socket.  Without capabilities you must run
-`totpgated` as root.
-
-The `setcap` step is recommended. It lets the daemon manipulate nftables
-rules without running as root — it drops to an unprivileged user after
-binding the UDP socket.  Without it you must run `totpgated` as root.
+user after binding the UDP socket.  Without setcap you must run
+`totpgated` as root (or invoke setcap manually).
 
 Pre-built binaries for multiple architectures are available on the
 [releases page](https://github.com/PepperDev/totpgate/releases).
@@ -96,8 +92,10 @@ warnings** before the section is considered complete.
 totpgated --port 2222 --target-port 22 --secret "JBSWY3DPEHPK3PXP" --timeout 30
 totpgated --port 2222 --target-port 22 --secret-file /etc/totpgate.key --foreground
 totpgated --port 0.0.0.0:2222 --port 192.168.1.1:2223 --interface eth0 --secret "JBSWY3DPEHPK3PXP"
+totpgated --port 2222 --port [::]:2223 --secret "JBSWY3DPEHPK3PXP"
 totpgate  --secret "hex:48656c6c6f" --port 2222 server.example.com
 totpgate  --secret "JBSWY3DPEHPK3PXP" server.example.com:3333
+totpgate  --secret "JBSWY3DPEHPK3PXP" [::1]:2222
 ```
 
 The daemon listens on UDP `--port` for a valid TOTP.  The client sends only
@@ -134,7 +132,7 @@ See the man pages (`totpgated.1`, `totpgate.1`) or `--help` for full options.
 │   ├── hmac.c / .h  — HMAC-SHA1
 │   ├── netlink.c / h— nftables rule management via netlink
 │   ├── udp.c / .h   — UDP socket bind / send / recv
-│   ├── privdrop.c/h— privilege drop & seccomp filter
+│   ├── privdrop.c / h— privilege drop & seccomp filter
 │   ├── ratelimit.c/h— per-IP rate limiting with backoff
 │   ├── seccomp.c / h— seccomp-BPF syscall filter
 │   └── util.c / .h  — logging helpers
