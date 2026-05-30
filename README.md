@@ -54,6 +54,31 @@ make clean    # remove build artefacts
 
 Output lands in `bin/`.
 
+### Manual installation (from source)
+
+```sh
+# Build and install
+make
+sudo make install
+
+# Override prefix for staged installs (e.g. package build)
+make DESTDIR=/tmp/staging install
+```
+
+`make install` copies the binaries and man pages to the standard paths
+and applies `cap_net_admin,cap_net_raw+ep` to the daemon binary (if
+run as root and `setcap` is available).  This lets the daemon manipulate
+nftables rules without running as root — it drops to an unprivileged
+user after binding the UDP socket.  Without capabilities you must run
+`totpgated` as root.
+
+The `setcap` step is recommended. It lets the daemon manipulate nftables
+rules without running as root — it drops to an unprivileged user after
+binding the UDP socket.  Without it you must run `totpgated` as root.
+
+Pre-built binaries for multiple architectures are available on the
+[releases page](https://github.com/PepperDev/totpgate/releases).
+
 ### Coverage gate
 
 ```sh

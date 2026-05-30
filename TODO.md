@@ -5,25 +5,6 @@
 
 ---
 
-## Packaging (capability-based execution)
-
-- [ ] **`make dist` target**: create a release tarball with
-  `security.capability` xattrs embedded.  Requires `setcap` on the binary
-  first, then `tar --xattrs --xattrs-include='security.capability'`.
-  Document the manual `setcap` command in README for users who build from
-  source.
-
-- [ ] **Debian packaging**: create `debian/totpgated.postinst` that runs
-  `setcap cap_net_admin,cap_net_raw+ep /usr/sbin/totpgated` on install/upgrade.
-  Must handle missing `setcap` gracefully.  Add `prerm` (remove) and `postrm`
-  (purge) scripts.
-
-- [ ] **RPM packaging**: add `%caps(cap_net_admin,cap_net_raw=pe) %{_sbindir}/totpgated`
-  to the spec file, wrapped in `%if %{_with_caps}`.  Add `BuildRequires:
-  libcap-devel` when caps are enabled.
-
----
-
 ## Robustness
 
 - [x] **Firewall cleanup on graceful exit**: catch SIGINT and delete the

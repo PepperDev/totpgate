@@ -38,13 +38,28 @@ CLIENT_TEST_BIN = $(BIN_DIR)/test_client
 
 OBJS      = $(MAIN_OBJS) $(LIB_OBJS)
 
-.PHONY: all daemon client test daemon-test netlink-test clean style coverage cppcheck
+DESTDIR   ?=
+SBINDIR   ?= $(DESTDIR)/usr/sbin
+BINDIR    ?= $(DESTDIR)/usr/bin
+MANDIR    ?= $(DESTDIR)/usr/share/man/man1
+
+.PHONY: all daemon client test daemon-test netlink-test clean style coverage cppcheck install
 
 all: daemon client
 
 daemon: $(DAEMON)
 
 client: $(CLIENT)
+
+install: daemon client
+	install -d $(SBINDIR) $(BINDIR) $(MANDIR)
+	install -m 755 $(DAEMON) $(SBINDIR)/totpgated
+	install -m 755 $(CLIENT) $(BINDIR)/totpgate
+	install -m 644 man/totpgated.1 $(MANDIR)/totpgated.1
+	install -m 644 man/totpgate.1 $(MANDIR)/totpgate.1
+	-@setcap cap_net_admin,cap_net_raw+ep $(SBINDIR)/totpgated 2>/dev/null && \
+	  echo "  [setcap] capabilities applied" || \
+	  echo "  [setcap] skipped (not root or setcap missing)"
 
 #  Shared library objects (no main/client)
 $(LIB_OBJS): | $(OBJ_DIR)

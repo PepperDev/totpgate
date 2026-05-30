@@ -215,6 +215,17 @@ jobs:
             echo " A lightweight port knocking daemon for Linux. Listens on UDP for a valid"
             echo " TOTP token and temporarily opens a TCP port via direct netlink manipulation."
           } > "$PKGDIR/DEBIAN/control"
+          # postinst: apply netlink capabilities on install/upgrade
+          cat > "$PKGDIR/DEBIAN/postinst" <<-'EOF'
+            #!/bin/sh
+            set -e
+            if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ]; then
+              if command -v setcap >/dev/null 2>&1; then
+                setcap cap_net_admin,cap_net_raw+ep /usr/sbin/totpgated 2>/dev/null || true
+              fi
+            fi
+EOF
+          chmod 755 "$PKGDIR/DEBIAN/postinst"
           dpkg-deb --build "$PKGDIR" >/dev/null
 
       - name: Install rpm
