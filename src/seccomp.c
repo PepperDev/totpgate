@@ -6,35 +6,18 @@
 #include <errno.h>
 #include <syslog.h>
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <linux/seccomp.h>
 #include <linux/filter.h>
 #include <linux/audit.h>
 
-/* x86_64 syscall numbers */
-#define SYS_poll 7
-#define SYS_read 0
-#define SYS_write 1
-#define SYS_writev 20
-#define SYS_close 3
-#define SYS_mmap 9
-#define SYS_mprotect 10
-#define SYS_munmap 11
-#define SYS_brk 12
-#define SYS_rt_sigaction 13
-#define SYS_rt_sigprocmask 14
-#define SYS_getpid 39
-#define SYS_sendto 44
-#define SYS_recvfrom 45
-#define SYS_exit 60
-#define SYS_arch_prctl 158
-#define SYS_futex 202
-#define SYS_clock_gettime 228
-#define SYS_exit_group 231
-#define SYS_epoll_wait 232
-#define SYS_epoll_ctl 233
-#define SYS_getrandom 318
-#define SYS_epoll_pwait 281
-#define SYS_gettimeofday 96
+#if defined(__x86_64__)
+#define AUDIT_ARCH_NATIVE AUDIT_ARCH_X86_64
+#elif defined(__aarch64__)
+#define AUDIT_ARCH_NATIVE AUDIT_ARCH_AARCH64
+#else
+#error "unsupported architecture for seccomp filter"
+#endif
 
 #define ALLOW(syscall) \
   BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, syscall, 0, 1), \
@@ -45,7 +28,7 @@ int install_seccomp(int foreground)
   struct sock_filter filter[] = {
     /* validate architecture */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, 4),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_NATIVE, 1, 0),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL),
 
     /* load syscall number */
