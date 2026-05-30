@@ -60,7 +60,15 @@ int install_seccomp(int foreground)
     ALLOW(SYS_arch_prctl),
 #endif
     ALLOW(SYS_futex),
+#ifdef SYS_clock_gettime
     ALLOW(SYS_clock_gettime),
+#endif
+#ifdef SYS_clock_gettime64
+    ALLOW(SYS_clock_gettime64),
+#endif
+#ifdef SYS_clock_gettime32
+    ALLOW(SYS_clock_gettime32),
+#endif
     ALLOW(SYS_poll),
 #ifdef SYS_epoll_wait
     ALLOW(SYS_epoll_wait),
