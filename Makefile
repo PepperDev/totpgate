@@ -154,6 +154,7 @@ cppcheck:
 	  --suppress=missingIncludeSystem \
 	  --suppress=nullPointerOutOfMemory:test/* \
 	  --suppress=unusedStructMember:test/* \
+	  --suppress=unmatchedSuppression \
 	  --inline-suppr \
 	  --check-level=exhaustive \
 	  -I $(SRC_DIR) --std=c99 \
