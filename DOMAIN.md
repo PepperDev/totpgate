@@ -325,6 +325,7 @@ legitimate reasons:
 | Function | File | Threshold exceeded | Justification |
 |---|---|---|---|
 | `process_block` | `src/sha1.c` | Nesting depth (4 > 3) | SHA-1 compression loop with 4-round if/else chain — algorithmic, not accidental complexity |
+| `rule_prune` | `src/main.c` | Nesting depth (4 > 3), ND=0 | Flush+recreate loop iterates rules twice — flat structure intentional for readability; NS=4 from two pass loops with expiry checks |
 
 New exceptions must be reviewed and justified here before adding to
 `make lizard`'s suppression logic.

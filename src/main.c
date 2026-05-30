@@ -40,6 +40,7 @@ struct dynamic_rule {
   uint8_t family;
   time_t expiry;
   int active;
+  struct sockaddr_storage addr;
 };
 
 struct daemon {
@@ -114,7 +115,8 @@ int read_secret_file(const char *path, struct config *cfg)
   return 0;
 }
 
-static void rule_track(struct daemon *d, uint64_t handle, uint8_t family, time_t expiry)
+static void rule_track(struct daemon *d, uint64_t handle, uint8_t family, time_t expiry,
+                       const struct sockaddr_storage *addr)
 {
   int i;
   for (i = 0; i < MAX_DYNAMIC_RULES; i++) {
@@ -123,6 +125,8 @@ static void rule_track(struct daemon *d, uint64_t handle, uint8_t family, time_t
       d->rules[i].family = family;
       d->rules[i].expiry = expiry;
       d->rules[i].active = 1;
+      if (addr)
+        memcpy(&d->rules[i].addr, addr, sizeof(*addr));
       if (i >= d->num_rules)
         d->num_rules = i + 1;
       return;
@@ -133,10 +137,29 @@ static void rule_track(struct daemon *d, uint64_t handle, uint8_t family, time_t
 void rule_prune(struct daemon *d, time_t now)
 {
   int i;
+  int found_expired = 0;
+
   for (i = 0; i < d->num_rules; i++) {
-    if (d->rules[i].active && now >= d->rules[i].expiry) {
-      netlink_rule_delete(d->rules[i].handle, d->rules[i].family);
-      d->rules[i].active = 0;
+    if (!d->rules[i].active)
+      continue;
+    if (now >= d->rules[i].expiry) {
+      found_expired = 1;
+    }
+  }
+
+  if (found_expired) {
+    netlink_flush_chain();
+    for (i = 0; i < d->num_rules; i++) {
+      if (!d->rules[i].active)
+        continue;
+      if (now < d->rules[i].expiry) {
+        uint64_t h = netlink_rule_insert(&d->rules[i].addr, d->cfg->target_port,
+                                         d->cfg->iface);
+        if (h)
+          d->rules[i].handle = h;
+      } else {
+        d->rules[i].active = 0;
+      }
     }
   }
 }
@@ -377,7 +400,7 @@ static void handle_one_packet(struct daemon *d, const unsigned char *buf, int le
     return;
   }
 
-  rule_track(d, rule_handle, rule_addr->ss_family, now + (time_t) d->cfg->timeout);
+  rule_track(d, rule_handle, rule_addr->ss_family, now + (time_t) d->cfg->timeout, rule_addr);
 
   {
     char ip_str[INET6_ADDRSTRLEN];

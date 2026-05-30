@@ -19,6 +19,9 @@ uint64_t g_nl_del_handle;
 uint8_t g_nl_del_family;
 int g_nl_cleanup_called;
 int g_nl_insert_family;
+int g_nl_flush_called;
+int g_nl_del_called;
+int g_nl_insert_called;
 
 void mock_netlink_reset(void)
 {
@@ -38,6 +41,9 @@ void mock_netlink_reset(void)
   g_nl_del_family = 0;
   g_nl_cleanup_called = 0;
   g_nl_insert_family = 0;
+  g_nl_flush_called = 0;
+  g_nl_del_called = 0;
+  g_nl_insert_called = 0;
 }
 
 int netlink_init(void)
@@ -47,6 +53,7 @@ int netlink_init(void)
 
 int netlink_flush_chain(void)
 {
+  g_nl_flush_called++;
   return g_nl_flush_ret;
 }
 
@@ -78,6 +85,7 @@ int netlink_add_jump_allowed(void)
 
 uint64_t netlink_rule_insert(const struct sockaddr_storage *src, uint16_t port, const char *iface)
 {
+  g_nl_insert_called++;
   g_nl_insert_family = src->ss_family;
   if (src->ss_family == AF_INET) {
     const struct sockaddr_in *in = (const struct sockaddr_in *)src;
@@ -100,6 +108,7 @@ uint64_t netlink_rule_insert(const struct sockaddr_storage *src, uint16_t port, 
 
 int netlink_rule_delete(uint64_t handle, uint8_t family)
 {
+  g_nl_del_called++;
   g_nl_del_handle = handle;
   g_nl_del_family = family;
   return g_nl_del_ret;

@@ -45,6 +45,7 @@ struct dynamic_rule {
   uint8_t family;
   time_t expiry;
   int active;
+  struct sockaddr_storage addr;
 };
 
 struct daemon {
@@ -119,6 +120,9 @@ extern int g_udp_recv_done;
 extern int g_udp_recv_family;
 extern int g_udp_recv_ipv4_mapped;
 extern int g_nl_insert_family;
+extern int g_nl_flush_called;
+extern int g_nl_del_called;
+extern int g_nl_insert_called;
 
 extern void mock_netlink_reset(void);
 extern void mock_udp_reset(void);
@@ -1256,9 +1260,11 @@ static void test_rule_prune_expired(void)
   d.rules[0].active = 1;
   d.num_rules = 1;
 
-  g_nl_del_handle = 0;
+  g_nl_flush_called = 0;
+  g_nl_del_called = 0;
   rule_prune(&d, 100);
-  ASSERT_INT_EQ((int)g_nl_del_handle, 42);
+  ASSERT_TRUE(g_nl_flush_called > 0);
+  ASSERT_INT_EQ(g_nl_del_called, 0);
   ASSERT_INT_EQ(d.rules[0].active, 0);
 
   daemon_cleanup(&d);
@@ -1268,9 +1274,9 @@ static void test_rule_prune_fresh_kept(void)
 {
   struct config cfg;
   struct daemon d;
+  struct sockaddr_in *in;
 
   mock_netlink_reset();
-  mock_udp_reset();
 
   memset(&cfg, 0, sizeof(cfg));
   set_cfg_port(&cfg, 2232);
@@ -1286,11 +1292,17 @@ static void test_rule_prune_fresh_kept(void)
   d.rules[0].family = AF_INET;
   d.rules[0].expiry = 200;
   d.rules[0].active = 1;
+  memset(&d.rules[0].addr, 0, sizeof(d.rules[0].addr));
+  d.rules[0].addr.ss_family = AF_INET;
+  in = (struct sockaddr_in *)&d.rules[0].addr;
+  in->sin_addr.s_addr = 0xc0a80101;
   d.num_rules = 1;
 
-  g_nl_del_handle = 0;
+  g_nl_flush_called = 0;
+  g_nl_insert_called = 0;
   rule_prune(&d, 100);
-  ASSERT_INT_EQ((int)g_nl_del_handle, 0);
+  ASSERT_INT_EQ(g_nl_flush_called, 0);
+  ASSERT_INT_EQ(g_nl_insert_called, 0);
   ASSERT_INT_EQ(d.rules[0].active, 1);
 
   daemon_cleanup(&d);

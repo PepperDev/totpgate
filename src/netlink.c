@@ -696,7 +696,6 @@ uint64_t netlink_rule_insert(const struct sockaddr_storage *src, uint16_t port, 
   msg_set(nlh, NFT_MSG_NEWRULE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_APPEND | NLM_F_CREATE, family);
   put_attr(nlh, NFTA_RULE_TABLE, (uint16_t) strlen(TABLE_NAME) + 1, TABLE_NAME);
   put_attr(nlh, NFTA_RULE_CHAIN, (uint16_t) strlen(ALLOWED_NAME) + 1, ALLOWED_NAME);
-  put_be64(nlh, NFTA_RULE_HANDLE, g_next_handle);
 
   {
     struct nlattr *exprs = begin_nest(nlh, NFTA_RULE_EXPRESSIONS);
