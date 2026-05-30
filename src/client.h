@@ -9,8 +9,6 @@ struct client_cfg {
   size_t secret_len;
   uint16_t port;
   char server[256];
-  uint16_t target_port;
-  int have_target_port;
 };
 
 int parse_args(struct client_cfg *cfg, int argc, char *argv[]);

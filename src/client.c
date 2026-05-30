@@ -20,14 +20,38 @@
 static void print_usage(const char *prog)
 {
   fprintf(stderr,
-          "Usage: %s --secret <secret> [options] <server> [target_port]\n"
+          "Usage: %s --secret <secret> [options] <server>[:<port>]\n"
           "\n"
           "Options:\n"
           "  --port <port>           UDP port (default: 2222)\n"
+          "                          Ignored when <server> includes a port\n"
           "  --secret <secret>       Shared secret\n"
           "                          (base32 by default; prefix with\n"
           "                           hex: or b64: for other encodings)\n"
           "  --help                  Show this help\n", prog);
+}
+
+static int parse_host_port(const char *str, uint16_t *port, size_t *host_len)
+{
+  const char *colon;
+
+  colon = strrchr(str, ':');
+  if (colon == NULL)
+    return 0;
+
+  /* Check if the part after the colon looks like a port number */
+  {
+    char *end;
+    long val;
+
+    val = strtol(colon + 1, &end, 10);
+    if (*end == '\0' && val >= 1 && val <= 65535) {
+      *port = (uint16_t) val;
+      *host_len = (size_t)(colon - str);
+      return 1;
+    }
+  }
+  return 0;
 }
 
 int parse_args(struct client_cfg *cfg, int argc, char *argv[])
@@ -87,21 +111,29 @@ int parse_args(struct client_cfg *cfg, int argc, char *argv[])
     return -1;
   }
 
-  if ((size_t)snprintf(cfg->server, sizeof(cfg->server), "%s", argv[optind]) >= sizeof(cfg->server)) {
-    fprintf(stderr, "error: server name too long\n");
-    return -1;
-  }
-  optind++;
+  {
+    const char *src = argv[optind];
+    size_t slen;
 
-  if (optind < argc) {
-    long val = atol(argv[optind]);
-    if (val < 1 || val > 65535) {
-      fprintf(stderr, "error: target_port must be 1-65535\n");
+    {
+      uint16_t p;
+      size_t host_len;
+      if (parse_host_port(src, &p, &host_len)) {
+        cfg->port = p;
+        slen = host_len;
+      } else {
+        slen = strlen(src);
+      }
+    }
+
+    if (slen >= sizeof(cfg->server)) {
+      fprintf(stderr, "error: server name too long\n");
       return -1;
     }
-    cfg->target_port = (uint16_t) val;
-    cfg->have_target_port = 1;
+    memcpy(cfg->server, src, slen);
+    cfg->server[slen] = '\0';
   }
+  optind++;
 
   return 0;
 }
@@ -121,12 +153,7 @@ int client_run(struct client_cfg *cfg)
   uint16_t port;
 
   token = totp_generate(cfg->secret, cfg->secret_len, (uint64_t) (time(NULL) / TOTP_STEP), TOTP_DIGITS);
-
-  if (cfg->have_target_port) {
-    pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u:%u", (unsigned)token, (unsigned)cfg->target_port);
-  } else {
-    pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
-  }
+  pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_INET;

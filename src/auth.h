@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <time.h>
 
-int auth_parse(const unsigned char *data, size_t len, uint32_t * token, uint16_t * port, uint32_t * lifetime);
+int auth_parse(const unsigned char *data, size_t len, uint32_t * token);
 
 int auth_validate(const unsigned char *secret, size_t secret_len,
                   uint32_t token, uint32_t src_ip, time_t now, int digits, int step, int drift_behind, int drift_ahead);

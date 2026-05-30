@@ -1,4 +1,4 @@
-.TH TOTPGATED 1 2026-05-28 "totpgate" "User Commands"
+.TH TOTPGATED 1 2026-05-30 "totpgate" "User Commands"
 .SH NAME
 totpgated \- Single Packet Authorization daemon
 .SH SYNOPSIS
@@ -66,20 +66,13 @@ Display usage and exit.
 The client sends a UDP datagram containing:
 .P
 .RS
-.I token\fR[\fB:\fR\fIport\fR[\fB:\fR\fIlifetime\fR]]
+\fItoken\fR
 .RE
 .P
-.TP
 \fItoken\fR
-6\-8 decimal digits (TOTP).
-.TP
-\fIport\fR
-Optional target TCP port override (0 = use config default).
-.TP
-\fIlifetime\fR
-Optional rule lifetime override in seconds (0 = use config default).
-.P
-Trailing data after the third field is ignored.
+6 decimal digits (TOTP).  The daemon rejects any packet with trailing
+data.  The target port and rule lifetime are controlled exclusively by
+the daemon's \fB\-\-target-port\fR and \fB\-\-timeout\fR options.
 .SH RATE LIMITING
 Per-IP failure tracking with exponential backoff. After the configured
 number of failures within the sliding window the IP is blocked for
@@ -87,19 +80,22 @@ number of failures within the sliding window the IP is blocked for
 duration, capped at \fB\-\-max-block\fR. A successful auth clears the
 failure count.
 .SH FIREWALL
-The daemon manages an nftables table named \fBtotpgate\fR:
+The daemon manages an nftables table named \fBtotpgate\fR with two chains:
 .TP
-Permanent rules
+\fBinput\fR (base hook, priority \-10)
 \fR[\fBiifname <iface>\fR] ct state established,related accept;
-\fR[\fBiifname <iface>\fR] tcp dport != <target> accept;
+\fR[\fBiifname <iface>\fR] jump allowed_ips;
 \fR[\fBiifname <iface>\fR] tcp dport <target> drop.
 .TP
-Ephemeral rules
-\fR[\fBiifname <iface>\fR] ip saddr <client> tcp dport <target> ct
-state new accept (auto-expires after \fB\-\-timeout\fR seconds).
+\fBallowed_ips\fR (regular chain)
+\fR[\fBiifname <iface>\fR] ip saddr <client> tcp dport <target> accept
+(auto-expires after \fB\-\-timeout\fR seconds).
 
 The \fBiifname\fR match is included only when \fB\-\-interface\fR is
-given.
+given.  The \fBinput\fR chain first accepts established/related traffic,
+then jumps to \fBallowed_ips\fR for dynamic allow rules, and finally
+drops unmatched SYN packets to the target port.  Non-target traffic
+implicitly passes due to the base chain's default accept policy.
 .SH SIGNALS
 .TP
 SIGTERM, SIGINT

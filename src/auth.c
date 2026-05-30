@@ -9,8 +9,6 @@
 #define MAX_PACKET_LEN 256
 #define MAX_TOKEN_DIGITS 8
 #define MIN_TOKEN_DIGITS 6
-#define MAX_PORT 65535
-#define MAX_LIFETIME 86400
 
 struct replay_entry {
   uint32_t ip;
@@ -101,29 +99,10 @@ void auth_replay_prune(time_t now, time_t max_age)
 
 /* ---- packet parser ---- */
 
-static int parse_digits(const unsigned char *data, size_t len, uint32_t *out, int max_digits)
-{
-  uint32_t val = 0;
-  size_t i;
-
-  if (len == 0 || len > (size_t)max_digits)
-    return -1;
-
-  for (i = 0; i < len; i++) {
-    if (data[i] < '0' || data[i] > '9')
-      return -1;
-    val = val * 10 + (uint32_t) (data[i] - '0');
-  }
-  *out = val;
-  return 0;
-}
-
-int auth_parse(const unsigned char *data, size_t len, uint32_t *token, uint16_t *port, uint32_t *lifetime)
+int auth_parse(const unsigned char *data, size_t len, uint32_t *token)
 {
   size_t i = 0;
   uint32_t t = 0;
-  uint32_t p = 0;
-  uint32_t l = 0;
   size_t token_len = 0;
 
   if (data == NULL || len == 0 || len > MAX_PACKET_LEN)
@@ -140,56 +119,11 @@ int auth_parse(const unsigned char *data, size_t len, uint32_t *token, uint16_t 
   if (token_len < MIN_TOKEN_DIGITS || token_len > MAX_TOKEN_DIGITS)
     return -1;
 
+  if (i != len)
+    return -1;
+
   if (token)
     *token = t;
-
-  if (i < len) {
-    if (data[i] != ':')
-      return -1;
-    i++;
-    {
-      size_t port_start = i;
-      size_t port_len = 0;
-
-      while (i < len && data[i] >= '0' && data[i] <= '9') {
-        port_len++;
-        i++;
-      }
-      if (port_len == 0 || port_len > 5)
-        return -1;
-
-      if (parse_digits(data + port_start, port_len, &p, 5) != 0)
-        return -1;
-      if (p > MAX_PORT)
-        return -1;
-      if (port)
-        *port = (uint16_t) p;
-    }
-
-    if (i < len) {
-      if (data[i] != ':')
-        return -1;
-      i++;
-      {
-        size_t life_start = i;
-        size_t life_len = 0;
-
-        while (i < len && data[i] >= '0' && data[i] <= '9') {
-          life_len++;
-          i++;
-        }
-        if (life_len == 0 || life_len > 5)
-          return -1;
-
-        if (parse_digits(data + life_start, life_len, &l, 5) != 0)
-          return -1;
-        if (l > MAX_LIFETIME)
-          return -1;
-        if (lifetime)
-          *lifetime = l;
-      }
-    }
-  }
 
   return 0;
 }

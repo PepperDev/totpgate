@@ -598,22 +598,17 @@ int daemon_process(struct daemon *d)
         uint16_t src_port = 0;
         int ret;
         uint32_t token;
-        uint16_t token_port;
-        uint32_t lifetime;
-        uint16_t target_port;
         uint64_t rule_handle;
 
         while ((ret = udp_recv(udp_fd, buf, sizeof(buf), &src_ip, &src_port)) > 0) {
           token = 0;
-          token_port = 0;
-          lifetime = 0;
 
           if (rate_limit_check(src_ip, now) != 0) {
             log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
             continue;
           }
 
-          if (auth_parse(buf, (size_t)ret, &token, &token_port, &lifetime) != 0) {
+          if (auth_parse(buf, (size_t)ret, &token) != 0) {
             log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
             rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
             continue;
@@ -629,18 +624,13 @@ int daemon_process(struct daemon *d)
 
           rate_limit_success(src_ip);
 
-          target_port = token_port ? token_port : d->cfg->target_port;
-
-          rule_handle = netlink_rule_insert(src_ip, target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
+          rule_handle = netlink_rule_insert(src_ip, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
           if (rule_handle == 0) {
             log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
             continue;
           }
 
-          {
-            uint32_t rule_lifetime = lifetime ? lifetime : d->cfg->timeout;
-            rule_track(d, rule_handle, now + (time_t) rule_lifetime);
-          }
+          rule_track(d, rule_handle, now + (time_t) d->cfg->timeout);
 
           snprintf(logbuf, sizeof(logbuf),
                    "accepted from %u.%u.%u.%u:%u (handle %llu)",

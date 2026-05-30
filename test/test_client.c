@@ -22,25 +22,53 @@ static void test_parse_args_minimal(void)
   ASSERT_INT_EQ((int)cfg.port, 2222);
   ASSERT_INT_EQ(cfg.secret_len, 10);
   ASSERT_STREQ(cfg.server, "127.0.0.1");
-  ASSERT_INT_EQ(cfg.have_target_port, 0);
 }
 
 static void test_parse_args_all_options(void)
 {
   struct client_cfg cfg;
   char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
-    "--port", "8080", "example.com", "443", NULL
+    "--port", "8080", "example.com", NULL
   };
   int ret;
 
   optind = 0;
-  ret = parse_args(&cfg, 7, argv);
+  ret = parse_args(&cfg, 6, argv);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)cfg.port, 8080);
   ASSERT_INT_EQ(cfg.secret_len, 10);
   ASSERT_STREQ(cfg.server, "example.com");
-  ASSERT_INT_EQ(cfg.have_target_port, 1);
-  ASSERT_INT_EQ((int)cfg.target_port, 443);
+}
+
+static void test_parse_args_host_port(void)
+{
+  struct client_cfg cfg;
+  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
+    "example.com:8080", NULL
+  };
+  int ret;
+
+  optind = 0;
+  ret = parse_args(&cfg, 4, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.port, 8080);
+  ASSERT_STREQ(cfg.server, "example.com");
+}
+
+static void test_parse_args_host_port_override_port_flag(void)
+{
+  struct client_cfg cfg;
+  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
+    "--port", "2222", "example.com:8080", NULL
+  };
+  int ret;
+
+  optind = 0;
+  ret = parse_args(&cfg, 6, argv);
+  ASSERT_INT_EQ(ret, 0);
+  /* host:port should override --port */
+  ASSERT_INT_EQ((int)cfg.port, 8080);
+  ASSERT_STREQ(cfg.server, "example.com");
 }
 
 static void test_parse_args_missing_secret(void)
@@ -83,32 +111,6 @@ static void test_parse_args_bad_port_overflow(void)
   struct client_cfg cfg;
   char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
     "--port", "65536", "127.0.0.1", NULL
-  };
-  int ret;
-
-  optind = 0;
-  ret = parse_args(&cfg, 5, argv);
-  ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_args_bad_target_port(void)
-{
-  struct client_cfg cfg;
-  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
-    "127.0.0.1", "0", NULL
-  };
-  int ret;
-
-  optind = 0;
-  ret = parse_args(&cfg, 5, argv);
-  ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_args_bad_target_port_overflow(void)
-{
-  struct client_cfg cfg;
-  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
-    "127.0.0.1", "65536", NULL
   };
   int ret;
 
@@ -218,57 +220,9 @@ static void test_client_run_success(void)
 
   n = recv(listener, buf, sizeof(buf), 0);
   ASSERT_TRUE(n >= 6);
-  ASSERT_TRUE(buf[5] == ':' || (buf[5] >= '0' && buf[5] <= '9'));
-
-  close(listener);
-}
-
-static void test_client_run_with_target_port(void)
-{
-  struct client_cfg cfg;
-  struct sockaddr_in bind_addr;
-  socklen_t addrlen;
-  int listener;
-  unsigned char secret[20];
-  size_t slen;
-  enum secret_encoding enc;
-  char buf[64];
-  ssize_t n;
-  int ret;
-
-  listener = socket(AF_INET, SOCK_DGRAM, 0);
-  ASSERT_TRUE(listener >= 0);
-
-  memset(&bind_addr, 0, sizeof(bind_addr));
-  bind_addr.sin_family = AF_INET;
-  bind_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  bind_addr.sin_port = 0;
-  ret = bind(listener, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
-  ASSERT_INT_EQ(ret, 0);
-
-  addrlen = sizeof(bind_addr);
-  ret = getsockname(listener, (struct sockaddr *)&bind_addr, &addrlen);
-  ASSERT_INT_EQ(ret, 0);
-
-  slen = sizeof(secret);
-  ret = secret_decode("JBSWY3DPEHPK3PXP", secret, &slen, &enc);
-  ASSERT_INT_EQ(ret, 0);
-
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.port = ntohs(bind_addr.sin_port);
-  cfg.secret_len = slen;
-  memcpy(cfg.secret, secret, slen);
-  snprintf(cfg.server, sizeof(cfg.server), "127.0.0.1");
-  cfg.target_port = 8080;
-  cfg.have_target_port = 1;
-
-  ret = client_run(&cfg);
-  ASSERT_INT_EQ(ret, 0);
-
-  n = recv(listener, buf, sizeof(buf), 0);
-  ASSERT_TRUE(n >= 6);
   buf[n] = '\0';
-  ASSERT_TRUE(strstr(buf, ":8080") != NULL);
+  /* should be just the token, no colon */
+  ASSERT_TRUE(strchr(buf, ':') == NULL);
 
   close(listener);
 }
@@ -292,18 +246,16 @@ TEST_GROUP(client)
 {
 TEST(test_parse_args_minimal),
       TEST(test_parse_args_all_options),
+      TEST(test_parse_args_host_port),
+      TEST(test_parse_args_host_port_override_port_flag),
       TEST(test_parse_args_missing_secret),
       TEST(test_parse_args_missing_server),
       TEST(test_parse_args_bad_port),
       TEST(test_parse_args_bad_port_overflow),
-      TEST(test_parse_args_bad_target_port),
-      TEST(test_parse_args_bad_target_port_overflow),
       TEST(test_parse_args_invalid_secret),
       TEST(test_parse_args_unknown_option),
       TEST(test_parse_args_server_too_long),
-      TEST(test_parse_args_hex_secret),
-      TEST(test_client_run_success),
-      TEST(test_client_run_with_target_port), TEST(test_client_run_resolve_fail), END_TEST};
+      TEST(test_parse_args_hex_secret), TEST(test_client_run_success), TEST(test_client_run_resolve_fail), END_TEST};
 
 #ifdef BUILD_CLIENT_TEST_MAIN
 int main(void)

@@ -41,8 +41,7 @@ The client `totpgate` accepts:
 |---|---|---|
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--port` | `2222` | UDP port of the target daemon |
-| `<server>` | *(required)* | IP or hostname of the daemon |
-| `<target_port>` | — | Override default target port (optional) |
+| `<server>` | *(required)* | IP or hostname of the daemon; may include `:port` suffix to override `--port` |
 
 ---
 
@@ -100,49 +99,47 @@ The UDP datagram sent by the client.  Wire format:
 
 ```
 ┌──────────────────────┐
-│ TOTP token  (4–8 B)  │  ASCII decimal digits
-│ separator   (1 B)    │  ':' (0x3A)  — optional
-│ target_port (0–5 B)  │  ASCII decimal, 0 = config default
-│ separator   (1 B)    │  ':' (0x3A)  — optional
-│ lifetime    (0–5 B)  │  ASCII decimal seconds, 0 = config default
+│ TOTP token  (6–8 B)  │  ASCII decimal digits
 └──────────────────────┘
 ```
 
-Minimal packet: just the token (e.g. `482639`).  
-Extended packet with target port: `482639:443`.  
-Full packet: `482639:443:120`.
-
-The daemon parses from left to right; unknown trailing data is ignored.
+The packet contains only the token (e.g. `482639`).  The daemon rejects any
+packet with trailing data.  The target port and rule lifetime are controlled
+exclusively by the daemon's `--target-port` and `--timeout` options.
 
 ### 2.5  `firewall_rule`
 
-A netfilter rule inserted via netlink into the **nftables** `ip` family.
-Attributes:
+Netfilter rules inserted via netlink into the **nftables** `ip` family.
 
-- **Table**: `totpgate` (created by daemon at startup).
-- **Chain**: `input` (hook `NF_INET_LOCAL_IN`, priority -10).
-- **Default policy**: `accept` (all non-matching traffic passes through).
+The daemon manages two chains in the `totpgate` table:
 
-**Permanent rules** (installed at startup, never expire):
+- **`input`** — base hook (`NF_INET_LOCAL_IN`, priority -10), default
+  policy `accept`.  Contains permanent rules evaluated in order.
+- **`allowed_ips`** — regular chain (no hook).  Contains ephemeral
+  rules that are only reached via a jump from `input`.
+
+**Permanent rules** (in `input` chain, installed at startup, never expire):
 
 | Match | Action |
 |---|---|
 | `ct state established,related` | `accept` |
+| *(no match)* | `jump allowed_ips` |
 | `[iifname <interface>] tcp dport <target_port>` | `drop` (silent, unmatched SYN) |
 
-Non-target traffic hits the default `accept` policy implicitly — no
-explicit skip-non-target rule is needed.
+Traffic that reaches the end of `allowed_ips` (no ephemeral match) returns
+to `input` and hits the drop rule.  Non-target traffic never matches the
+drop rule and falls through to the chain's default `accept` policy.
 
-**Ephemeral rules** (inserted on successful auth, auto-expire after
-`--timeout` seconds):
+**Ephemeral rules** (in `allowed_ips` chain, inserted on successful auth,
+auto-expire after `--timeout` seconds):
 
 | Match | Action |
 |---|---|
-| `ip saddr <client_ip> tcp dport <target_port>` | `accept` |
+| `[iifname <interface>] ip saddr <client_ip> tcp dport <target_port>` | `accept` |
 
 The ephemeral rule omits `ct state new` because the permanent
-`established,related accept` rule is evaluated first in the chain and
-catches non-new packets — the ephemeral rule only matches what reaches it.
+`established,related accept` rule is evaluated first in `input` and
+catches non-new packets before the jump.
 
 ### 2.6  `auth_session`
 
@@ -153,7 +150,7 @@ Runtime record kept by the daemon for each authenticated client:
 | `src_ip` | `uint32_t` | Client IPv4 (network byte order) |
 | `dst_port` | `uint16_t` | Target TCP port |
 | `created` | `time_t` | When the rule was inserted |
-| `lifetime` | `uint32_t` | Requested lifetime in seconds |
+| `lifetime` | `uint32_t` | Rule lifetime in seconds (from `--timeout`) |
 | `seq` | `uint64_t` | Monotonic counter (anti-replay) |
 
 The daemon **may** prune expired sessions from its table on each event loop
@@ -170,7 +167,7 @@ informational and used for logging / status.
 IF  received UDP datagram on <listen_port>
 AND packet matches auth_packet format
 AND TOTP(token, secret) is valid for at least one window in auth_window
-THEN create or refresh firewall_rule for <sender_ip>:<target_port>
+THEN create or refresh firewall_rule for <sender_ip>:<daemon_target_port>
 ```
 
 ### BR-2  Token validity
@@ -200,13 +197,20 @@ ON  startup:
     IF  table "totpgate" does not exist:
         create table "totpgate"
     IF  chain "input" does not exist:
-        create chain "input" (hook input, priority 0)
-    flush chain "totpgate input"          // removes stale rules
-    insert rule: ct state established,related accept   // permanent
-    insert rule: [iifname <interface>] tcp dport <target> drop  // default-drop
+        create chain "input" (hook input, priority -10, policy accept)
+    create chain "allowed_ips"                              (regular chain)
+    flush chain "totpgate input"                 // removes stale rules
+    insert rule (input): ct state established,related accept   // permanent
+    insert rule (input): jump allowed_ips
+    insert rule (input): [iifname <interface>] tcp dport <target> drop
 ```
 
-If `--interface` was given, the drop rule (and every ephemeral accept rule)
+The `input` chain is evaluated in order: established/related traffic is
+accepted immediately; remaining packets jump to `allowed_ips` for
+dynamic matching; unmatched SYN packets to the target port are silently
+dropped.  Non-target traffic falls through to the default `accept` policy.
+
+If `--interface` was given, the drop rule (and every rule in `allowed_ips`)
 includes an `iifname <interface>` match so that rules only apply to packets
 arriving on that interface.
 
@@ -214,13 +218,14 @@ arriving on that interface.
 
 ```
 ON  successful authentication:
-    insert rule: ip saddr <client_ip> tcp dport <target> accept
+    append rule (allowed_ips): [iifname <interface>] ip saddr <client_ip> tcp dport <target> accept
                   // auto-expires after <timeout> seconds
 ```
 
-The rule omits `ct state new` — the permanent `established,related accept`
-rule (BR-4) is evaluated first, so the ephemeral rule only ever sees
-non-established, non-related packets.
+The rule is appended to the `allowed_ips` chain.  It omits `ct state new`
+— the permanent `established,related accept` rule (BR-4) is evaluated
+first, so the ephemeral rule only ever sees non-established, non-related
+packets.
 
 ### BR-6  Privilege drop
 

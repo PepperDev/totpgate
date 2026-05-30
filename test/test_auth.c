@@ -15,90 +15,16 @@ static void test_parse_token_only(void)
 {
   const unsigned char data[] = "287082";
   uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
+  int ret = auth_parse(data, sizeof(data) - 1, &token);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)token, 287082);
-  ASSERT_INT_EQ((int)port, 0);
-  ASSERT_INT_EQ((int)lifetime, 0);
-}
-
-static void test_parse_token_port(void)
-{
-  const unsigned char data[] = "482639:443";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)token, 482639);
-  ASSERT_INT_EQ((int)port, 443);
-  ASSERT_INT_EQ((int)lifetime, 0);
-}
-
-static void test_parse_token_port_lifetime(void)
-{
-  const unsigned char data[] = "482639:443:120";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)token, 482639);
-  ASSERT_INT_EQ((int)port, 443);
-  ASSERT_INT_EQ((int)lifetime, 120);
-}
-
-static void test_parse_zero_port(void)
-{
-  const unsigned char data[] = "482639:0";
-  uint32_t token = 0;
-  uint16_t port = 9999;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)port, 0);
-}
-
-static void test_parse_zero_lifetime(void)
-{
-  const unsigned char data[] = "482639:443:0";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 9999;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)lifetime, 0);
-}
-
-static void test_parse_trailing_ignored(void)
-{
-  const unsigned char data[] = "287082:80:30extra";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)token, 287082);
-  ASSERT_INT_EQ((int)port, 80);
-  ASSERT_INT_EQ((int)lifetime, 30);
 }
 
 static void test_parse_8_digit_token(void)
 {
   const unsigned char data[] = "94287082";
   uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
+  int ret = auth_parse(data, sizeof(data) - 1, &token);
   ASSERT_INT_EQ(ret, 0);
   ASSERT_INT_EQ((int)token, 94287082);
 }
@@ -106,13 +32,13 @@ static void test_parse_8_digit_token(void)
 static void test_parse_empty(void)
 {
   const unsigned char data[] = "";
-  int ret = auth_parse(data, 0, NULL, NULL, NULL);
+  int ret = auth_parse(data, 0, NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_parse_null(void)
 {
-  int ret = auth_parse(NULL, 5, NULL, NULL, NULL);
+  int ret = auth_parse(NULL, 5, NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
@@ -122,88 +48,36 @@ static void test_parse_too_long(void)
   int ret;
 
   memset(data, '0', sizeof(data));
-  ret = auth_parse(data, sizeof(data), NULL, NULL, NULL);
+  ret = auth_parse(data, sizeof(data), NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_parse_short_token(void)
 {
   const unsigned char data[] = "12345";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
+  int ret = auth_parse(data, sizeof(data) - 1, NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_parse_long_token(void)
 {
   const unsigned char data[] = "123456789";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
+  int ret = auth_parse(data, sizeof(data) - 1, NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
 static void test_parse_non_digit_token(void)
 {
   const unsigned char data[] = "abcdef";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
+  int ret = auth_parse(data, sizeof(data) - 1, NULL);
   ASSERT_INT_EQ(ret, -1);
 }
 
-static void test_parse_bad_port(void)
+static void test_parse_trailing_rejected(void)
 {
-  const unsigned char data[] = "287082:abc";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
+  const unsigned char data[] = "287082:80";
+  int ret = auth_parse(data, sizeof(data) - 1, NULL);
   ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_port_overflow(void)
-{
-  const unsigned char data[] = "287082:65536";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
-  ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_bad_lifetime(void)
-{
-  const unsigned char data[] = "287082:80:xyz";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
-  ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_lifetime_overflow(void)
-{
-  const unsigned char data[] = "287082:80:86401";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
-  ASSERT_INT_EQ(ret, -1);
-}
-
-static void test_parse_port_max(void)
-{
-  const unsigned char data[] = "287082:65535";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)port, 65535);
-}
-
-static void test_parse_lifetime_max(void)
-{
-  const unsigned char data[] = "287082:80:86400";
-  uint32_t token = 0;
-  uint16_t port = 0;
-  uint32_t lifetime = 0;
-  int ret = auth_parse(data, sizeof(data) - 1,
-                       &token, &port, &lifetime);
-  ASSERT_INT_EQ(ret, 0);
-  ASSERT_INT_EQ((int)lifetime, 86400);
-}
-
-static void test_parse_null_output_ptrs(void)
-{
-  const unsigned char data[] = "287082:443:120";
-  int ret = auth_parse(data, sizeof(data) - 1, NULL, NULL, NULL);
-  ASSERT_INT_EQ(ret, 0);
 }
 
 /* ---- auth_validate tests ---- */
@@ -290,13 +164,13 @@ static void test_replay_newer_seq_ok(void)
 {
   auth_replay_reset();
 
-  /* t=59 → counter=1 */
+  /* t=59 -> counter=1 */
   int ret = auth_validate(g_secret, sizeof(g_secret),
                           94287082, 0x06060606, 59,
                           8, 30, 0, 1);
   ASSERT_INT_EQ(ret, 0);
 
-  /* t=1111111081 → counter=37037036, with drift_ahead=1 matches counter=37037037 */
+  /* t=1111111081 -> counter=37037036, with drift_ahead=1 matches counter=37037037 */
   ret = auth_validate(g_secret, sizeof(g_secret), 14050471, 0x06060606, 1111111081, 8, 30, 0, 1);
   ASSERT_INT_EQ(ret, 0);
 }
@@ -329,11 +203,6 @@ static void test_record_and_check(void)
 TEST_GROUP(auth)
 {
 TEST(test_parse_token_only),
-      TEST(test_parse_token_port),
-      TEST(test_parse_token_port_lifetime),
-      TEST(test_parse_zero_port),
-      TEST(test_parse_zero_lifetime),
-      TEST(test_parse_trailing_ignored),
       TEST(test_parse_8_digit_token),
       TEST(test_parse_empty),
       TEST(test_parse_null),
@@ -341,13 +210,7 @@ TEST(test_parse_token_only),
       TEST(test_parse_short_token),
       TEST(test_parse_long_token),
       TEST(test_parse_non_digit_token),
-      TEST(test_parse_bad_port),
-      TEST(test_parse_port_overflow),
-      TEST(test_parse_bad_lifetime),
-      TEST(test_parse_lifetime_overflow),
-      TEST(test_parse_port_max),
-      TEST(test_parse_lifetime_max),
-      TEST(test_parse_null_output_ptrs),
+      TEST(test_parse_trailing_rejected),
       TEST(test_validate_exact),
       TEST(test_validate_drift_ahead),
       TEST(test_validate_drift_behind),
