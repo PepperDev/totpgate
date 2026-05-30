@@ -1,5 +1,6 @@
 #include "auth.h"
 #include "totp.h"
+#include "addr.h"
 
 #include <errno.h>
 #include <string.h>
@@ -11,7 +12,7 @@
 #define MIN_TOKEN_DIGITS 6
 
 struct replay_entry {
-  uint32_t ip;
+  ip_addr_t ip;
   uint64_t last_seq;
   time_t last_seen;
   int used;
@@ -19,17 +20,14 @@ struct replay_entry {
 
 static struct replay_entry g_replay[REPLAY_TABLE_SIZE];
 
-static size_t replay_idx(uint32_t ip)
+static size_t replay_idx(const ip_addr_t *ip)
 {
-  uint32_t h = ip;
+  uint32_t h = ip_hash32(ip);
 
-  h ^= h >> 16;
-  h ^= h >> 8;
-  h ^= h >> 4;
   return (size_t)(h & REPLAY_TABLE_MASK);
 }
 
-int auth_seen_before(uint64_t seq, uint32_t src_ip)
+int auth_seen_before(uint64_t seq, const ip_addr_t *src_ip)
 {
   size_t idx = replay_idx(src_ip);
   size_t i;
@@ -39,7 +37,7 @@ int auth_seen_before(uint64_t seq, uint32_t src_ip)
 
     if (!g_replay[pos].used)
       return 0;
-    if (g_replay[pos].ip == src_ip) {
+    if (ip_eq(&g_replay[pos].ip, src_ip)) {
       if (seq <= g_replay[pos].last_seq)
         return -1;
       return 0;
@@ -48,7 +46,7 @@ int auth_seen_before(uint64_t seq, uint32_t src_ip)
   return 0;
 }
 
-int auth_record_seq(uint64_t seq, uint32_t src_ip)
+int auth_record_seq(uint64_t seq, const ip_addr_t *src_ip)
 {
   size_t idx = replay_idx(src_ip);
   size_t first_empty = REPLAY_TABLE_SIZE;
@@ -62,7 +60,7 @@ int auth_record_seq(uint64_t seq, uint32_t src_ip)
         first_empty = pos;
       break;
     }
-    if (g_replay[pos].ip == src_ip) {
+    if (ip_eq(&g_replay[pos].ip, src_ip)) {
       g_replay[pos].last_seq = seq;
       g_replay[pos].last_seen = time(NULL);
       return 0;
@@ -70,7 +68,7 @@ int auth_record_seq(uint64_t seq, uint32_t src_ip)
   }
 
   if (first_empty < REPLAY_TABLE_SIZE) {
-    g_replay[first_empty].ip = src_ip;
+    g_replay[first_empty].ip = *src_ip;
     g_replay[first_empty].last_seq = seq;
     g_replay[first_empty].last_seen = time(NULL);
     g_replay[first_empty].used = 1;
@@ -148,9 +146,9 @@ int auth_validate(const unsigned char *secret, size_t secret_len, uint32_t token
     counter = (uint64_t) ((int64_t) current + d);
 
     if (totp_generate(secret, secret_len, counter, p->digits) == token) {
-      if (auth_seen_before(counter, p->src_ip) != 0)
+      if (auth_seen_before(counter, &p->src_ip) != 0)
         return -1;
-      if (auth_record_seq(counter, p->src_ip) != 0)
+      if (auth_record_seq(counter, &p->src_ip) != 0)
         return -1;
       return 0;
     }

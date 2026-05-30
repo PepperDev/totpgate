@@ -16,6 +16,11 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
   if (fd < 0)
     return -1;
 
+  if (addr->ss_family == AF_INET6) {
+    int off = 0;
+    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+  }
+
   flags = fcntl(fd, F_GETFL);
   if (flags < 0) {
     close(fd);
@@ -36,22 +41,17 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
   return fd;
 }
 
-int udp_recv(int fd, unsigned char *buf, size_t len, uint32_t *src_ip, uint16_t *src_port)
+int udp_recv(int fd, unsigned char *buf, size_t len, struct sockaddr_storage *src_addr, socklen_t *src_len)
 {
-  struct sockaddr_in addr;
-  socklen_t addrlen = sizeof(addr);
-
   for (;;) {
-    ssize_t n = recvfrom(fd, buf, len, 0, (struct sockaddr *)&addr, &addrlen);
+    socklen_t addrlen = src_len ? *src_len : sizeof(struct sockaddr_storage);
+    ssize_t n = recvfrom(fd, buf, len, 0, (struct sockaddr *)src_addr, &addrlen);
     if (n >= 0) {
-      if (src_ip)
-        *src_ip = addr.sin_addr.s_addr;
-      if (src_port)
-        *src_port = addr.sin_port;
+      if (src_len)
+        *src_len = addrlen;
       return (int)n;
     }
-    if (errno == EINTR)
-      continue;
-    return -1;
+    if (errno != EINTR)
+      return -1;
   }
 }

@@ -5,6 +5,7 @@
 #include "auth.h"
 #include "totp.h"
 #include "ratelimit.h"
+#include "addr.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -41,6 +42,7 @@ struct config {
 
 struct dynamic_rule {
   uint64_t handle;
+  uint8_t family;
   time_t expiry;
   int active;
 };
@@ -76,6 +78,10 @@ static uint16_t port_from_listen_addr(const struct listen_addr *la)
     const struct sockaddr_in *in = (const struct sockaddr_in *)&la->addr;
     return ntohs(in->sin_port);
   }
+  if (la->addr.ss_family == AF_INET6) {
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)&la->addr;
+    return ntohs(in6->sin6_port);
+  }
   return 0;
 }
 
@@ -99,6 +105,7 @@ extern char g_nl_drop_iface[16];
 extern int g_nl_cleanup_called;
 extern int g_nl_del_ret;
 extern uint64_t g_nl_del_handle;
+extern uint8_t g_nl_del_family;
 extern uint64_t g_nl_insert_return;
 extern uint32_t g_nl_insert_ip;
 extern char g_nl_insert_iface[16];
@@ -109,9 +116,22 @@ extern size_t g_udp_recv_len;
 extern uint32_t g_udp_recv_src_ip;
 extern uint16_t g_udp_recv_src_port;
 extern int g_udp_recv_done;
+extern int g_udp_recv_family;
+extern int g_nl_insert_family;
 
 extern void mock_netlink_reset(void);
 extern void mock_udp_reset(void);
+
+/* helper to build an ip_addr_t from a uint32 IPv4 address */
+static ip_addr_t ip4(uint32_t v4)
+{
+  ip_addr_t ip;
+
+  ip.family = AF_INET;
+  memcpy(ip.addr, &v4, 4);
+  memset(ip.addr + 4, 0, 12);
+  return ip;
+}
 
 /* ---- parse_daemon_args tests ---- */
 
@@ -949,28 +969,95 @@ static void test_daemon_rate_limit_success_clears(void)
   daemon_cleanup(&d);
 }
 
+static void test_daemon_netlink_insert_fail(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  uint32_t token;
+  uint64_t counter;
+  char pkt[32];
+  size_t pkt_len;
+  int i;
+  int s;
+  struct sockaddr_in addr;
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++)
+    test_secret[i] = (unsigned char)(i + 1);
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2234);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  /* make netlink_rule_insert fail */
+  g_nl_insert_return = 0;
+
+  counter = (uint64_t) (time(NULL) / 30);
+  token = totp_generate(test_secret, 20, counter, 6);
+  pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
+  g_udp_recv_len = pkt_len;
+  memcpy(g_udp_recv_buf, pkt, pkt_len);
+  g_udp_recv_src_ip = 0x05050505;
+  g_udp_recv_src_port = 7777;
+
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  ASSERT_TRUE(s >= 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(2234);
+  addr.sin_addr.s_addr = htonl(0x7f000001);
+  sendto(s, pkt, 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+  close(s);
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  /* rule should NOT have been tracked */
+  ASSERT_INT_EQ(d.num_rules, 0);
+
+  daemon_cleanup(&d);
+  auth_replay_reset();
+}
+
 /* ---- auth_replay tests for prune ---- */
 
 static void test_prune_expired(void)
 {
+  ip_addr_t ip1 = ip4(0x01010101);
+  ip_addr_t ip2 = ip4(0x02020202);
+
   auth_replay_reset();
 
-  auth_record_seq(100, 0x01010101);
-  auth_record_seq(200, 0x02020202);
+  auth_record_seq(100, &ip1);
+  auth_record_seq(200, &ip2);
 
   auth_replay_prune(time(NULL) + 10, 5);
-  ASSERT_INT_EQ(auth_seen_before(100, 0x01010101), 0);
-  ASSERT_INT_EQ(auth_seen_before(200, 0x02020202), 0);
+  ASSERT_INT_EQ(auth_seen_before(100, &ip1), 0);
+  ASSERT_INT_EQ(auth_seen_before(200, &ip2), 0);
 }
 
 static void test_prune_fresh_kept(void)
 {
+  ip_addr_t ip = ip4(0x03030303);
+
   auth_replay_reset();
 
-  auth_record_seq(100, 0x03030303);
+  auth_record_seq(100, &ip);
 
   auth_replay_prune(time(NULL), 3600);
-  ASSERT_INT_EQ(auth_seen_before(100, 0x03030303), -1);
+  ASSERT_INT_EQ(auth_seen_before(100, &ip), -1);
 }
 
 /* ---- parse_args --interface tests ---- */
@@ -1157,6 +1244,7 @@ static void test_rule_prune_expired(void)
 
   /* set a rule that is already expired */
   d.rules[0].handle = 42;
+  d.rules[0].family = AF_INET;
   d.rules[0].expiry = 1;
   d.rules[0].active = 1;
   d.num_rules = 1;
@@ -1188,6 +1276,7 @@ static void test_rule_prune_fresh_kept(void)
 
   /* set a rule that is still valid */
   d.rules[0].handle = 42;
+  d.rules[0].family = AF_INET;
   d.rules[0].expiry = 200;
   d.rules[0].active = 1;
   d.num_rules = 1;
@@ -1264,6 +1353,69 @@ static void test_rule_tracking_via_process(void)
   auth_replay_reset();
 }
 
+static void test_daemon_process_packet_ipv6(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  uint32_t token;
+  uint64_t counter;
+  char pkt[32];
+  size_t pkt_len;
+  int i;
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2235);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  counter = (uint64_t) (time(NULL) / 30);
+  token = totp_generate(test_secret, 20, counter, 6);
+  pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
+  g_udp_recv_len = pkt_len;
+  memcpy(g_udp_recv_buf, pkt, pkt_len);
+  g_udp_recv_src_ip = 0x01010101;
+  g_udp_recv_src_port = 54321;
+  g_udp_recv_family = AF_INET6;
+
+  {
+    int s;
+    struct sockaddr_in wakeup;
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_TRUE(s >= 0);
+    memset(&wakeup, 0, sizeof(wakeup));
+    wakeup.sin_family = AF_INET;
+    wakeup.sin_port = htons(2235);
+    wakeup.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sendto(s, pkt, 1, 0, (struct sockaddr *)&wakeup, sizeof(wakeup));
+    close(s);
+  }
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  ASSERT_INT_EQ(g_nl_insert_family, AF_INET6);
+  ASSERT_TRUE(g_nl_insert_return > 0);
+
+  daemon_cleanup(&d);
+  auth_replay_reset();
+}
+
 /* ---- test group ---- */
 
 TEST_GROUP(daemon)
@@ -1292,6 +1444,7 @@ TEST(test_parse_minimal),
       TEST(test_parse_rate_limit_bad),
       TEST(test_daemon_rate_limit_block),
       TEST(test_daemon_rate_limit_success_clears),
+      TEST(test_daemon_netlink_insert_fail),
       TEST(test_prune_expired), TEST(test_prune_fresh_kept),
       TEST(test_parse_user), TEST(test_parse_group),
       TEST(test_parse_secret_file), TEST(test_parse_secret_file_too_long),
@@ -1302,7 +1455,8 @@ TEST(test_parse_minimal),
       TEST(test_parse_port_ip_hostname_getaddrinfo_err),
       TEST(test_parse_port_with_ipv4), TEST(test_parse_port_with_ipv6), TEST(test_parse_too_many_ports),
       TEST(test_rule_tracking), TEST(test_rule_prune_expired),
-      TEST(test_rule_prune_fresh_kept), TEST(test_rule_tracking_via_process), END_TEST};
+      TEST(test_rule_prune_fresh_kept), TEST(test_rule_tracking_via_process),
+      TEST(test_daemon_process_packet_ipv6), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)

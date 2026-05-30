@@ -64,7 +64,7 @@ static int parse_listen_addr(const char *s, struct listen_addr *la)
     hints.ai_family = AF_UNSPEC;
   } else {
     hints.ai_flags = AI_PASSIVE;
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_INET6;
   }
 
   ret = getaddrinfo(node[0] ? node : NULL, port_str, &hints, &res);
@@ -307,13 +307,13 @@ int parse_daemon_args(struct config *cfg, int argc, char *argv[])
   }
 
   if (cfg->num_ports == 0) {
-    struct sockaddr_in *in = (struct sockaddr_in *)&cfg->ports[0].addr;
+    struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&cfg->ports[0].addr;
 
-    memset(in, 0, sizeof(*in));
-    in->sin_family = AF_INET;
-    in->sin_port = htons(2222);
-    in->sin_addr.s_addr = htonl(INADDR_ANY);
-    cfg->ports[0].addrlen = sizeof(*in);
+    memset(in6, 0, sizeof(*in6));
+    in6->sin6_family = AF_INET6;
+    in6->sin6_port = htons(2222);
+    in6->sin6_addr = in6addr_any;
+    cfg->ports[0].addrlen = sizeof(*in6);
     cfg->num_ports = 1;
   }
 

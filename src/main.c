@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <net/if.h>
 #include <fcntl.h>
 #include "encode.h"
@@ -36,6 +37,7 @@
 
 struct dynamic_rule {
   uint64_t handle;
+  uint8_t family;
   time_t expiry;
   int active;
 };
@@ -112,12 +114,13 @@ int read_secret_file(const char *path, struct config *cfg)
   return 0;
 }
 
-static void rule_track(struct daemon *d, uint64_t handle, time_t expiry)
+static void rule_track(struct daemon *d, uint64_t handle, uint8_t family, time_t expiry)
 {
   int i;
   for (i = 0; i < MAX_DYNAMIC_RULES; i++) {
     if (!d->rules[i].active) {
       d->rules[i].handle = handle;
+      d->rules[i].family = family;
       d->rules[i].expiry = expiry;
       d->rules[i].active = 1;
       if (i >= d->num_rules)
@@ -132,7 +135,7 @@ void rule_prune(struct daemon *d, time_t now)
   int i;
   for (i = 0; i < d->num_rules; i++) {
     if (d->rules[i].active && now >= d->rules[i].expiry) {
-      netlink_rule_delete(d->rules[i].handle);
+      netlink_rule_delete(d->rules[i].handle, d->rules[i].family);
       d->rules[i].active = 0;
     }
   }
@@ -296,23 +299,35 @@ static int daemon_handle_signal(struct daemon *d)
   return 1;
 }
 
-static void handle_one_packet(struct daemon *d, const unsigned char *buf, int len, uint32_t src_ip, uint16_t src_port)
+static void handle_one_packet(struct daemon *d, const unsigned char *buf, int len,
+                              const struct sockaddr_storage *src_addr)
 {
+  ip_addr_t src_ip;
+  uint16_t src_port = 0;
   uint32_t token;
   uint64_t rule_handle;
   char logbuf[128];
   time_t now;
 
+  ip_from_sockaddr(src_addr, &src_ip);
+  if (src_addr->ss_family == AF_INET) {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)src_addr;
+    src_port = ntohs(in->sin_port);
+  } else {
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)src_addr;
+    src_port = ntohs(in6->sin6_port);
+  }
+
   now = time(NULL);
 
-  if (rate_limit_check(src_ip, now) != 0) {
+  if (rate_limit_check(&src_ip, now) != 0) {
     log_msg(d->cfg, LOG_WARNING, "rate limited, dropping");
     return;
   }
 
   if (auth_parse(buf, (size_t)len, &token) != 0) {
     log_msg(d->cfg, LOG_WARNING, "auth_parse failed");
-    rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+    rate_limit_fail(&src_ip, now, &d->cfg->rate_limit);
     return;
   }
 
@@ -327,24 +342,26 @@ static void handle_one_packet(struct daemon *d, const unsigned char *buf, int le
   };
   if (auth_validate(d->cfg->secret, d->cfg->secret_len, token, &tp) != 0) {
     log_msg(d->cfg, LOG_WARNING, "auth_validate failed");
-    rate_limit_fail(src_ip, now, &d->cfg->rate_limit);
+    rate_limit_fail(&src_ip, now, &d->cfg->rate_limit);
     return;
   }
 
-  rate_limit_success(src_ip);
+  rate_limit_success(&src_ip);
 
-  rule_handle = netlink_rule_insert(src_ip, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
+  rule_handle = netlink_rule_insert(src_addr, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
   if (rule_handle == 0) {
     log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
     return;
   }
 
-  rule_track(d, rule_handle, now + (time_t) d->cfg->timeout);
+  rule_track(d, rule_handle, src_addr->ss_family, now + (time_t) d->cfg->timeout);
 
-  snprintf(logbuf, sizeof(logbuf),
-           "accepted from %u.%u.%u.%u:%u (handle %llu)",
-           (src_ip >> 0) & 0xff, (src_ip >> 8) & 0xff,
-           (src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff, (unsigned)src_port, (unsigned long long)rule_handle);
+  {
+    char ip_str[INET6_ADDRSTRLEN];
+    inet_ntop(src_ip.family, src_ip.addr, ip_str, sizeof(ip_str));
+    snprintf(logbuf, sizeof(logbuf),
+             "accepted from %s:%u (handle %llu)", ip_str, (unsigned)src_port, (unsigned long long)rule_handle);
+  }
   log_msg(d->cfg, LOG_INFO, logbuf);
 }
 
@@ -391,12 +408,13 @@ int daemon_process(struct daemon *d)
 
       if (udp_fd >= 0) {
         unsigned char buf[256];
-        uint32_t src_ip = 0;
-        uint16_t src_port = 0;
+        struct sockaddr_storage src_addr;
+        socklen_t src_len = sizeof(src_addr);
         int ret;
 
-        while ((ret = udp_recv(udp_fd, buf, sizeof(buf), &src_ip, &src_port)) > 0) {
-          handle_one_packet(d, buf, ret, src_ip, src_port);
+        while ((ret = udp_recv(udp_fd, buf, sizeof(buf), &src_addr, &src_len)) > 0) {
+          handle_one_packet(d, buf, ret, &src_addr);
+          src_len = sizeof(src_addr);
         }
       }
     }

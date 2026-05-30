@@ -157,18 +157,23 @@ static void test_add_default_drop_ok(void)
 
 static void test_rule_insert_ok(void)
 {
+  struct sockaddr_storage addr;
+  struct sockaddr_in *in = (struct sockaddr_in *)&addr;
   uint64_t h;
 
-  h = netlink_rule_insert(0xc0a80101, 22, NULL);
+  memset(&addr, 0, sizeof(addr));
+  addr.ss_family = AF_INET;
+  in->sin_addr.s_addr = 0xc0a80101;
+  h = netlink_rule_insert(&addr, 22, NULL);
   ASSERT_TRUE(h != 0);
-  ASSERT_INT_EQ((int)h, 6);
+  ASSERT_INT_EQ((int)h, 12);
 }
 
 static void test_rule_delete_ok(void)
 {
   int ret;
 
-  ret = netlink_rule_delete(99);
+  ret = netlink_rule_delete(99, AF_INET);
   ASSERT_INT_EQ(ret, 0);
 }
 

@@ -4,9 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+#include "addr.h"
 
 struct totp_params {
-  uint32_t src_ip;
+  ip_addr_t src_ip;
   time_t now;
   int digits;
   int step;

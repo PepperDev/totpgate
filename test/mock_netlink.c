@@ -1,6 +1,7 @@
 #include "netlink.h"
 #include <stdint.h>
 #include <string.h>
+#include <netinet/in.h>
 
 int g_nl_init_ret;
 int g_nl_flush_ret;
@@ -15,7 +16,9 @@ char g_nl_insert_iface[16];
 uint64_t g_nl_insert_return;
 int g_nl_del_ret;
 uint64_t g_nl_del_handle;
+uint8_t g_nl_del_family;
 int g_nl_cleanup_called;
+int g_nl_insert_family;
 
 void mock_netlink_reset(void)
 {
@@ -32,7 +35,9 @@ void mock_netlink_reset(void)
   g_nl_insert_return = 1;
   g_nl_del_ret = 0;
   g_nl_del_handle = 0;
+  g_nl_del_family = 0;
   g_nl_cleanup_called = 0;
+  g_nl_insert_family = 0;
 }
 
 int netlink_init(void)
@@ -71,9 +76,15 @@ int netlink_add_jump_allowed(void)
   return 0;
 }
 
-uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
+uint64_t netlink_rule_insert(const struct sockaddr_storage *src, uint16_t port, const char *iface)
 {
-  g_nl_insert_ip = ip;
+  g_nl_insert_family = src->ss_family;
+  if (src->ss_family == AF_INET) {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)src;
+    g_nl_insert_ip = in->sin_addr.s_addr;
+  } else {
+    g_nl_insert_ip = 0;
+  }
   g_nl_insert_port = port;
   if (iface) {
     size_t len = strlen(iface);
@@ -87,9 +98,10 @@ uint64_t netlink_rule_insert(uint32_t ip, uint16_t port, const char *iface)
   return g_nl_insert_return;
 }
 
-int netlink_rule_delete(uint64_t handle)
+int netlink_rule_delete(uint64_t handle, uint8_t family)
 {
   g_nl_del_handle = handle;
+  g_nl_del_family = family;
   return g_nl_del_ret;
 }
 

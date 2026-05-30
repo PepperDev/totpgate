@@ -14,6 +14,7 @@ size_t g_udp_recv_len;
 uint32_t g_udp_recv_src_ip;
 uint16_t g_udp_recv_src_port;
 int g_udp_recv_done;
+int g_udp_recv_family;
 
 static int g_last_fd;
 
@@ -29,15 +30,27 @@ void mock_udp_reset(void)
   g_udp_recv_src_ip = 0;
   g_udp_recv_src_port = 0;
   g_udp_recv_done = 0;
+  g_udp_recv_family = AF_INET;
   g_last_fd = -1;
+}
+
+static uint16_t get_port_from_addr(const struct sockaddr_storage *addr)
+{
+  if (addr->ss_family == AF_INET) {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
+    return ntohs(in->sin_port);
+  }
+  if (addr->ss_family == AF_INET6) {
+    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)addr;
+    return ntohs(in6->sin6_port);
+  }
+  return 0;
 }
 
 int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
 {
-  struct sockaddr_in *in;
-
   (void)addrlen;
-  if (addr->ss_family != AF_INET) {
+  if (addr->ss_family != AF_INET && addr->ss_family != AF_INET6) {
     g_udp_open_port = 0;
     if (g_udp_open_ret < 0)
       return -1;
@@ -48,8 +61,7 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
     return g_last_fd;
   }
 
-  in = (struct sockaddr_in *)addr;
-  g_udp_open_port = ntohs(in->sin_port);
+  g_udp_open_port = get_port_from_addr(addr);
 
   if (g_udp_open_ret < 0)
     return -1;
@@ -71,9 +83,10 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
   return g_last_fd;
 }
 
-int udp_recv(int fd, unsigned char *buf, size_t len, uint32_t *src_ip, uint16_t *src_port)
+int udp_recv(int fd, unsigned char *buf, size_t len, struct sockaddr_storage *src_addr, socklen_t *src_len)
 {
   (void)fd;
+  (void)src_len;
   if (g_udp_recv_done) {
     return -1;
   }
@@ -81,11 +94,20 @@ int udp_recv(int fd, unsigned char *buf, size_t len, uint32_t *src_ip, uint16_t 
   if (g_udp_recv_len > 0) {
     size_t copy_len = (g_udp_recv_len < len) ? g_udp_recv_len : len;
     memcpy(buf, g_udp_recv_buf, copy_len);
-    if (src_ip) {
-      *src_ip = g_udp_recv_src_ip;
-    }
-    if (src_port) {
-      *src_port = g_udp_recv_src_port;
+    if (src_addr) {
+      if (g_udp_recv_family == AF_INET6) {
+        struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)src_addr;
+        memset(in6, 0, sizeof(*in6));
+        in6->sin6_family = AF_INET6;
+        memcpy(&in6->sin6_addr, &g_udp_recv_src_ip, 4);
+        in6->sin6_port = htons(g_udp_recv_src_port);
+      } else {
+        struct sockaddr_in *in = (struct sockaddr_in *)src_addr;
+        memset(in, 0, sizeof(*in));
+        in->sin_family = AF_INET;
+        in->sin_addr.s_addr = g_udp_recv_src_ip;
+        in->sin_port = htons(g_udp_recv_src_port);
+      }
     }
     return (int)copy_len;
   }

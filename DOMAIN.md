@@ -109,7 +109,7 @@ exclusively by the daemon's `--target-port` and `--timeout` options.
 
 ### 2.5  `firewall_rule`
 
-Netfilter rules inserted via netlink into the **nftables** `ip` family.
+Netfilter rules inserted via netlink into the **nftables** `ip` and `ip6` families.
 
 The daemon manages two chains in the `totpgate` table:
 
@@ -135,7 +135,8 @@ auto-expire after `--timeout` seconds):
 
 | Match | Action |
 |---|---|
-| `[iifname <interface>] ip saddr <client_ip> tcp dport <target_port>` | `accept` |
+| `[iifname <interface>] ip saddr <client_ip> tcp dport <target_port>` | `accept` (`ip` family) |
+| `[iifname <interface>] ip6 saddr <client_ip> tcp dport <target_port>` | `accept` (`ip6` family) |
 
 The ephemeral rule omits `ct state new` because the permanent
 `established,related accept` rule is evaluated first in `input` and
@@ -218,7 +219,8 @@ arriving on that interface.
 
 ```
 ON  successful authentication:
-    append rule (allowed_ips): [iifname <interface>] ip saddr <client_ip> tcp dport <target> accept
+    append rule (allowed_ips): [iifname <interface>] <family> saddr <client_ip> tcp dport <target> accept
+                  // <family> is `ip` for AF_INET and `ip6` for AF_INET6
                   // auto-expires after <timeout> seconds
 ```
 

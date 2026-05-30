@@ -1,4 +1,5 @@
 #include "ratelimit.h"
+#include "addr.h"
 
 #include <string.h>
 
@@ -6,7 +7,7 @@
 #define RATE_TABLE_MASK 63
 
 struct rate_entry {
-  uint32_t ip;
+  ip_addr_t ip;
   uint32_t fail_count;
   time_t first_fail;
   time_t block_until;
@@ -16,17 +17,14 @@ struct rate_entry {
 
 static struct rate_entry g_table[RATE_TABLE_SIZE];
 
-static size_t rate_idx(uint32_t ip)
+static size_t rate_idx(const ip_addr_t *ip)
 {
-  uint32_t h = ip;
+  uint32_t h = ip_hash32(ip);
 
-  h ^= h >> 16;
-  h ^= h >> 8;
-  h ^= h >> 4;
   return (size_t)(h & RATE_TABLE_MASK);
 }
 
-int rate_limit_check(uint32_t ip, time_t now)
+int rate_limit_check(const ip_addr_t *ip, time_t now)
 {
   size_t idx = rate_idx(ip);
   size_t i;
@@ -36,7 +34,7 @@ int rate_limit_check(uint32_t ip, time_t now)
 
     if (!g_table[pos].used)
       return 0;
-    if (g_table[pos].ip == ip) {
+    if (ip_eq(&g_table[pos].ip, ip)) {
       if (now < g_table[pos].block_until)
         return -1;
       return 0;
@@ -58,7 +56,7 @@ static uint32_t calc_block_duration(uint32_t current, const struct rate_limit_cf
   }
 }
 
-void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
+void rate_limit_fail(const ip_addr_t *ip, time_t now, const struct rate_limit_cfg *cfg)
 {
   size_t idx = rate_idx(ip);
   size_t first_empty = RATE_TABLE_SIZE;
@@ -73,7 +71,7 @@ void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
       break;
     }
 
-    if (g_table[pos].ip == ip) {
+    if (ip_eq(&g_table[pos].ip, ip)) {
       if (now - g_table[pos].first_fail > (time_t) cfg->window) {
         g_table[pos].fail_count = 1;
         g_table[pos].first_fail = now;
@@ -90,7 +88,7 @@ void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
   }
 
   if (first_empty < RATE_TABLE_SIZE) {
-    g_table[first_empty].ip = ip;
+    g_table[first_empty].ip = *ip;
     g_table[first_empty].fail_count = 1;
     g_table[first_empty].first_fail = now;
     g_table[first_empty].block_until = 0;
@@ -99,7 +97,7 @@ void rate_limit_fail(uint32_t ip, time_t now, const struct rate_limit_cfg *cfg)
   }
 }
 
-void rate_limit_success(uint32_t ip)
+void rate_limit_success(const ip_addr_t *ip)
 {
   size_t idx = rate_idx(ip);
   size_t i;
@@ -109,7 +107,7 @@ void rate_limit_success(uint32_t ip)
 
     if (!g_table[pos].used)
       return;
-    if (g_table[pos].ip == ip) {
+    if (ip_eq(&g_table[pos].ip, ip)) {
       g_table[pos].used = 0;
       return;
     }

@@ -1,5 +1,6 @@
 #include "test_runner.h"
 #include "auth.h"
+#include "addr.h"
 
 #include <string.h>
 
@@ -8,6 +9,17 @@ static const unsigned char g_secret[20] = {
   0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36,
   0x37, 0x38, 0x39, 0x30,
 };
+
+/* helper to build an ip_addr_t from a uint32 IPv4 address */
+static ip_addr_t ip4(uint32_t v4)
+{
+  ip_addr_t ip;
+
+  ip.family = AF_INET;
+  memcpy(ip.addr, &v4, 4);
+  memset(ip.addr + 4, 0, 12);
+  return ip;
+}
 
 /* ---- auth_parse tests ---- */
 
@@ -85,7 +97,7 @@ static void test_parse_trailing_rejected(void)
 static void test_validate_exact(void)
 {
   const struct totp_params p = {
-    .src_ip = 0x01010101,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x01010101),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -96,7 +108,7 @@ static void test_validate_exact(void)
 static void test_validate_drift_ahead(void)
 {
   const struct totp_params p = {
-    .src_ip = 0x01010101,.now = 1111111081,.digits = 8,.step = 30,
+    .src_ip = ip4(0x01010101),.now = 1111111081,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 1,
   };
   auth_replay_reset();
@@ -107,7 +119,7 @@ static void test_validate_drift_ahead(void)
 static void test_validate_drift_behind(void)
 {
   const struct totp_params p = {
-    .src_ip = 0x01010101,.now = 89,.digits = 8,.step = 30,
+    .src_ip = ip4(0x01010101),.now = 89,.digits = 8,.step = 30,
     .drift_behind = 1,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -118,7 +130,7 @@ static void test_validate_drift_behind(void)
 static void test_validate_wrong_token(void)
 {
   const struct totp_params p = {
-    .src_ip = 0x01010101,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x01010101),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -131,7 +143,7 @@ static void test_validate_wrong_token(void)
 static void test_replay_same_window(void)
 {
   const struct totp_params p = {
-    .src_ip = 0x02020202,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x02020202),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -146,11 +158,11 @@ static void test_replay_same_window(void)
 static void test_replay_different_ip(void)
 {
   const struct totp_params p1 = {
-    .src_ip = 0x03030303,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x03030303),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   const struct totp_params p2 = {
-    .src_ip = 0x04040404,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x04040404),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -165,11 +177,11 @@ static void test_replay_different_ip(void)
 static void test_replay_older_seq(void)
 {
   const struct totp_params p59 = {
-    .src_ip = 0x05050505,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x05050505),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   const struct totp_params p29 = {
-    .src_ip = 0x05050505,.now = 29,.digits = 8,.step = 30,
+    .src_ip = ip4(0x05050505),.now = 29,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 0,
   };
   auth_replay_reset();
@@ -185,11 +197,11 @@ static void test_replay_older_seq(void)
 static void test_replay_newer_seq_ok(void)
 {
   const struct totp_params p59 = {
-    .src_ip = 0x06060606,.now = 59,.digits = 8,.step = 30,
+    .src_ip = ip4(0x06060606),.now = 59,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 1,
   };
   const struct totp_params p1081 = {
-    .src_ip = 0x06060606,.now = 1111111081,.digits = 8,.step = 30,
+    .src_ip = ip4(0x06060606),.now = 1111111081,.digits = 8,.step = 30,
     .drift_behind = 0,.drift_ahead = 1,
   };
   auth_replay_reset();
@@ -207,24 +219,28 @@ static void test_replay_newer_seq_ok(void)
 
 static void test_seen_not_recorded(void)
 {
+  ip_addr_t ip = ip4(0x07070707);
+
   auth_replay_reset();
-  int ret = auth_seen_before(42, 0x07070707);
+  int ret = auth_seen_before(42, &ip);
   ASSERT_INT_EQ(ret, 0);
 }
 
 static void test_record_and_check(void)
 {
+  ip_addr_t ip = ip4(0x08080808);
+
   auth_replay_reset();
-  int ret = auth_record_seq(42, 0x08080808);
+  int ret = auth_record_seq(42, &ip);
   ASSERT_INT_EQ(ret, 0);
 
-  ret = auth_seen_before(42, 0x08080808);
+  ret = auth_seen_before(42, &ip);
   ASSERT_INT_EQ(ret, -1);
 
-  ret = auth_seen_before(41, 0x08080808);
+  ret = auth_seen_before(41, &ip);
   ASSERT_INT_EQ(ret, -1);
 
-  ret = auth_seen_before(43, 0x08080808);
+  ret = auth_seen_before(43, &ip);
   ASSERT_INT_EQ(ret, 0);
 }
 

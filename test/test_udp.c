@@ -74,15 +74,19 @@ static void test_open_and_recv(void)
   ASSERT_INT_EQ(ret, (int)sizeof(payload));
 
   unsigned char buf[64];
-  uint32_t src_ip;
-  uint16_t src_port;
-  ret = udp_recv(fd, buf, sizeof(buf), &src_ip, &src_port);
+  struct sockaddr_storage src_addr;
+  socklen_t src_len = sizeof(src_addr);
+  ret = udp_recv(fd, buf, sizeof(buf), &src_addr, &src_len);
   ASSERT_INT_EQ(ret, (int)sizeof(payload));
   ASSERT_INT_EQ(memcmp(buf, payload, sizeof(payload)), 0);
-  ASSERT_INT_EQ((int)src_ip, (int)htonl(INADDR_LOOPBACK));
-  ASSERT_TRUE(src_port != 0);
+  {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)&src_addr;
+    ASSERT_INT_EQ(in->sin_family, AF_INET);
+    ASSERT_INT_EQ((int)in->sin_addr.s_addr, (int)htonl(INADDR_LOOPBACK));
+    ASSERT_TRUE(in->sin_port != 0);
+  }
 
-  ret = udp_recv(fd, buf, sizeof(buf), &src_ip, &src_port);
+  ret = udp_recv(fd, buf, sizeof(buf), &src_addr, &src_len);
   ASSERT_INT_EQ(ret, -1);
 
   close(snd);
@@ -123,13 +127,17 @@ static void test_recv_small_buf(void)
   ASSERT_INT_EQ(ret, (int)sizeof(payload));
 
   unsigned char buf[4];
-  uint32_t src_ip;
-  uint16_t src_port;
-  ret = udp_recv(fd, buf, sizeof(buf), &src_ip, &src_port);
+  struct sockaddr_storage src_addr;
+  socklen_t src_len = sizeof(src_addr);
+  ret = udp_recv(fd, buf, sizeof(buf), &src_addr, &src_len);
   ASSERT_INT_EQ(ret, 4);
   ASSERT_INT_EQ(memcmp(buf, "ABCD", 4), 0);
-  ASSERT_INT_EQ((int)src_ip, (int)htonl(INADDR_LOOPBACK));
-  ASSERT_TRUE(src_port != 0);
+  {
+    const struct sockaddr_in *in = (const struct sockaddr_in *)&src_addr;
+    ASSERT_INT_EQ(in->sin_family, AF_INET);
+    ASSERT_INT_EQ((int)in->sin_addr.s_addr, (int)htonl(INADDR_LOOPBACK));
+    ASSERT_TRUE(in->sin_port != 0);
+  }
 
   close(snd);
   close(fd);
@@ -143,6 +151,19 @@ static void test_open_socket_fail(void)
   addr.ss_family = AF_UNSPEC;
   int fd = udp_open(&addr, sizeof(addr));
   ASSERT_INT_EQ(fd, -1);
+}
+
+static void test_open_ipv6_success(void)
+{
+  struct sockaddr_in6 addr;
+
+  memset(&addr, 0, sizeof(addr));
+  addr.sin6_family = AF_INET6;
+  addr.sin6_port = htons(22226);
+  addr.sin6_addr = in6addr_any;
+  int fd = udp_open((struct sockaddr_storage *)&addr, sizeof(addr));
+  ASSERT_TRUE(fd >= 0);
+  close(fd);
 }
 
 static void test_null_ptrs(void)
@@ -180,4 +201,5 @@ TEST_GROUP(udp)
 {
 TEST(test_open_success),
       TEST(test_open_and_recv), TEST(test_open_bind_fail),
-      TEST(test_recv_small_buf), TEST(test_null_ptrs), TEST(test_open_socket_fail), END_TEST};
+      TEST(test_recv_small_buf), TEST(test_null_ptrs), TEST(test_open_socket_fail),
+      TEST(test_open_ipv6_success), END_TEST};

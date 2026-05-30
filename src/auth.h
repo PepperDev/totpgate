@@ -11,9 +11,9 @@ int auth_parse(const unsigned char *data, size_t len, uint32_t * token);
 
 int auth_validate(const unsigned char *secret, size_t secret_len, uint32_t token, const struct totp_params *p);
 
-int auth_seen_before(uint64_t seq, uint32_t src_ip);
+int auth_seen_before(uint64_t seq, const ip_addr_t * src_ip);
 
-int auth_record_seq(uint64_t seq, uint32_t src_ip);
+int auth_record_seq(uint64_t seq, const ip_addr_t * src_ip);
 
 void auth_replay_reset(void);
 
