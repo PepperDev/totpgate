@@ -132,7 +132,7 @@ static int handle_port_opt(struct config *cfg, const char *optarg)
       struct sockaddr_in *in4 = (struct sockaddr_in *)&cfg->ports[cfg->num_ports].addr;
       memset(in4, 0, sizeof(*in4));
       in4->sin_family = AF_INET;
-      in4->sin_port = htons((uint16_t)val);
+      in4->sin_port = htons((uint16_t) val);
       in4->sin_addr.s_addr = htonl(INADDR_ANY);
       cfg->ports[cfg->num_ports].addrlen = sizeof(*in4);
       cfg->num_ports++;
@@ -142,7 +142,7 @@ static int handle_port_opt(struct config *cfg, const char *optarg)
       struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&cfg->ports[cfg->num_ports].addr;
       memset(in6, 0, sizeof(*in6));
       in6->sin6_family = AF_INET6;
-      in6->sin6_port = htons((uint16_t)val);
+      in6->sin6_port = htons((uint16_t) val);
       in6->sin6_addr = in6addr_any;
       cfg->ports[cfg->num_ports].addrlen = sizeof(*in6);
       cfg->num_ports++;
