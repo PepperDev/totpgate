@@ -13,8 +13,12 @@
 
 #if defined(__x86_64__)
 #define AUDIT_ARCH_NATIVE AUDIT_ARCH_X86_64
+#elif defined(__i386__) || defined(__i686__)
+#define AUDIT_ARCH_NATIVE AUDIT_ARCH_I386
 #elif defined(__aarch64__)
 #define AUDIT_ARCH_NATIVE AUDIT_ARCH_AARCH64
+#elif defined(__arm__)
+#define AUDIT_ARCH_NATIVE AUDIT_ARCH_ARM
 #else
 #error "unsupported architecture for seccomp filter"
 #endif
@@ -46,15 +50,21 @@ int install_seccomp(int foreground)
     ALLOW(SYS_rt_sigaction),
     ALLOW(SYS_rt_sigprocmask),
     ALLOW(SYS_getpid),
+#ifdef SYS_gettimeofday
     ALLOW(SYS_gettimeofday),
+#endif
     ALLOW(SYS_sendto),
     ALLOW(SYS_recvfrom),
     ALLOW(SYS_exit),
+#ifdef SYS_arch_prctl
     ALLOW(SYS_arch_prctl),
+#endif
     ALLOW(SYS_futex),
     ALLOW(SYS_clock_gettime),
     ALLOW(SYS_poll),
+#ifdef SYS_epoll_wait
     ALLOW(SYS_epoll_wait),
+#endif
     ALLOW(SYS_epoll_pwait),
     ALLOW(SYS_epoll_ctl),
     ALLOW(SYS_exit_group),
