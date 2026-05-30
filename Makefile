@@ -57,6 +57,7 @@ install: daemon client
 	install -m 755 $(CLIENT) $(BINDIR)/totpgate
 	install -m 644 man/totpgated.1 $(MANDIR)/totpgated.1
 	install -m 644 man/totpgate.1 $(MANDIR)/totpgate.1
+	-strip $(SBINDIR)/totpgated $(BINDIR)/totpgate 2>/dev/null || true
 	-@setcap cap_net_admin,cap_net_raw+ep $(SBINDIR)/totpgated 2>/dev/null && \
 	  echo "  [setcap] capabilities applied" || \
 	  echo "  [setcap] skipped (not root or setcap missing)"
