@@ -5,9 +5,16 @@
 
 ---
 
+## IPv6 support
+
+- [ ] **AF_INET6 in netlink rules**: add `NFT_FAMILY_INET6` handling alongside AF_INET in `netlink.c`
+- [ ] **Dual-stack listener**: accept IPv4 and IPv6 tokens on the same UDP socket (or separate per-IP sockets)
+- [ ] **Mixed address matching**: allow `--interface` rules to match both IPv4 and IPv6 source addresses
+
+---
+
 ## Future improvements
 
 - **systemd service + packaging**: add `totpgated.service` to `.deb`/`.rpm`
-- **IPv6 support**: `netlink.c` currently handles AF_INET only
 - **Config file support**: `--config /etc/totpgated.conf` as alternative to CLI flags
 - **Fuzz testing**: fuzz the auth packet parser for robustness
