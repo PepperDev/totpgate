@@ -17,8 +17,8 @@ int udp_open(const struct sockaddr_storage *addr, socklen_t addrlen)
     return -1;
 
   if (addr->ss_family == AF_INET6) {
-    int off = 0;
-    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+    int on = 1;
+    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on));
   }
 
   flags = fcntl(fd, F_GETFL);

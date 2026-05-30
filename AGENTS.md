@@ -122,6 +122,13 @@ performs better under heavy workload.  Key principles:
 - **Memory**: fixed-size pools aren't just for embedded — they prevent
   allocation jitter under load.  Prefer a pre-allocated session pool with an
   SLAB-style free list.
+- **Dual-stack listening**: by default the daemon binds **two** UDP sockets —
+  `0.0.0.0:2222` (AF_INET) and `[::]:2222` (AF_INET6, `IPV6_V6ONLY=1`).
+  IPv4 clients arrive on the AF_INET socket with a native IPv4 address,
+  avoiding IPv4-mapped IPv6 (`::ffff:x.x.x.x`) that would otherwise land on
+  the `ip6` nftables family.  When a single socket is explicitly configured
+  (e.g. `--port [::]:2222`), `IPV6_V6ONLY=1` prevents accidental IPv4
+  overlap.
 
 ---
 

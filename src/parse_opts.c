@@ -109,6 +109,48 @@ static void print_usage(const char *prog)
 
 static int handle_port_opt(struct config *cfg, const char *optarg)
 {
+  char node[256];
+  const char *port_str;
+
+  if (parse_addr_str(optarg, node, sizeof(node), &port_str) != 0) {
+    fprintf(stderr, "error: invalid --port '%s'\n", optarg);
+    return -1;
+  }
+
+  if (node[0] == '\0') {
+    long val = atol(port_str);
+    if (val < 1 || val > 65535) {
+      fprintf(stderr, "error: invalid --port '%s'\n", optarg);
+      return -1;
+    }
+    if (cfg->num_ports >= MAX_PORTS - 1) {
+      fprintf(stderr, "error: too many --port arguments (max %d)\n", MAX_PORTS);
+      return -1;
+    }
+
+    {
+      struct sockaddr_in *in4 = (struct sockaddr_in *)&cfg->ports[cfg->num_ports].addr;
+      memset(in4, 0, sizeof(*in4));
+      in4->sin_family = AF_INET;
+      in4->sin_port = htons((uint16_t)val);
+      in4->sin_addr.s_addr = htonl(INADDR_ANY);
+      cfg->ports[cfg->num_ports].addrlen = sizeof(*in4);
+      cfg->num_ports++;
+    }
+
+    {
+      struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&cfg->ports[cfg->num_ports].addr;
+      memset(in6, 0, sizeof(*in6));
+      in6->sin6_family = AF_INET6;
+      in6->sin6_port = htons((uint16_t)val);
+      in6->sin6_addr = in6addr_any;
+      cfg->ports[cfg->num_ports].addrlen = sizeof(*in6);
+      cfg->num_ports++;
+    }
+
+    return 0;
+  }
+
   if (cfg->num_ports >= MAX_PORTS) {
     fprintf(stderr, "error: too many --port arguments (max %d)\n", MAX_PORTS);
     return -1;
@@ -307,14 +349,22 @@ int parse_daemon_args(struct config *cfg, int argc, char *argv[])
   }
 
   if (cfg->num_ports == 0) {
-    struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&cfg->ports[0].addr;
+    struct sockaddr_in *in4 = (struct sockaddr_in *)&cfg->ports[0].addr;
+    struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&cfg->ports[1].addr;
+
+    memset(in4, 0, sizeof(*in4));
+    in4->sin_family = AF_INET;
+    in4->sin_port = htons(2222);
+    in4->sin_addr.s_addr = htonl(INADDR_ANY);
+    cfg->ports[0].addrlen = sizeof(*in4);
 
     memset(in6, 0, sizeof(*in6));
     in6->sin6_family = AF_INET6;
     in6->sin6_port = htons(2222);
     in6->sin6_addr = in6addr_any;
-    cfg->ports[0].addrlen = sizeof(*in6);
-    cfg->num_ports = 1;
+    cfg->ports[1].addrlen = sizeof(*in6);
+
+    cfg->num_ports = 2;
   }
 
   return 0;

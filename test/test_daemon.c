@@ -117,6 +117,7 @@ extern uint32_t g_udp_recv_src_ip;
 extern uint16_t g_udp_recv_src_port;
 extern int g_udp_recv_done;
 extern int g_udp_recv_family;
+extern int g_udp_recv_ipv4_mapped;
 extern int g_nl_insert_family;
 
 extern void mock_netlink_reset(void);
@@ -147,8 +148,11 @@ static void test_parse_minimal(void)
   optind = 0;
   int ret = parse_daemon_args(&cfg, 3, argv);
   ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ(cfg.num_ports, 2);
   ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 2222);
-  ASSERT_INT_EQ(cfg.num_ports, 1);
+  ASSERT_INT_EQ(cfg.ports[0].addr.ss_family, AF_INET);
+  ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[1]), 2222);
+  ASSERT_INT_EQ(cfg.ports[1].addr.ss_family, AF_INET6);
   ASSERT_INT_EQ((int)cfg.target_port, 22);
   ASSERT_INT_EQ((int)cfg.timeout, 30);
   ASSERT_INT_EQ(cfg.foreground, 0);
@@ -170,8 +174,11 @@ static void test_parse_all_options(void)
   optind = 0;
   int ret = parse_daemon_args(&cfg, 10, argv);
   ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ(cfg.num_ports, 2);
   ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[0]), 9999);
-  ASSERT_INT_EQ(cfg.num_ports, 1);
+  ASSERT_INT_EQ(cfg.ports[0].addr.ss_family, AF_INET);
+  ASSERT_INT_EQ((int)port_from_listen_addr(&cfg.ports[1]), 9999);
+  ASSERT_INT_EQ(cfg.ports[1].addr.ss_family, AF_INET6);
   ASSERT_INT_EQ((int)cfg.target_port, 443);
   ASSERT_INT_EQ((int)cfg.timeout, 120);
   ASSERT_INT_EQ(cfg.foreground, 1);
@@ -1416,6 +1423,71 @@ static void test_daemon_process_packet_ipv6(void)
   auth_replay_reset();
 }
 
+static void test_daemon_v4mapped_on_v6_socket(void)
+{
+  struct config cfg;
+  struct daemon d;
+  unsigned char test_secret[20];
+  uint32_t token;
+  uint64_t counter;
+  char pkt[32];
+  size_t pkt_len;
+  int i;
+
+  rate_limit_reset();
+  mock_netlink_reset();
+  mock_udp_reset();
+
+  for (i = 0; i < 20; i++) {
+    test_secret[i] = (unsigned char)(i + 1);
+  }
+
+  memset(&cfg, 0, sizeof(cfg));
+  set_cfg_port(&cfg, 2235);
+  cfg.target_port = 22;
+  cfg.secret_len = 20;
+  cfg.foreground = 1;
+  cfg.rate_limit.min_block = 300;
+  cfg.rate_limit.max_block = 86400;
+  cfg.rate_limit.max_fails = 5;
+  cfg.rate_limit.window = 60;
+  memcpy(cfg.secret, test_secret, 20);
+
+  ASSERT_INT_EQ(daemon_setup(&d, &cfg), 0);
+
+  counter = (uint64_t) (time(NULL) / 30);
+  token = totp_generate(test_secret, 20, counter, 6);
+  pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
+  g_udp_recv_len = pkt_len;
+  memcpy(g_udp_recv_buf, pkt, pkt_len);
+  g_udp_recv_src_ip = 0x0a999aa8;
+  g_udp_recv_src_port = 54321;
+  g_udp_recv_family = AF_INET6;
+  g_udp_recv_ipv4_mapped = 1;
+
+  {
+    int s;
+    struct sockaddr_in wakeup;
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_TRUE(s >= 0);
+    memset(&wakeup, 0, sizeof(wakeup));
+    wakeup.sin_family = AF_INET;
+    wakeup.sin_port = htons(2235);
+    wakeup.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sendto(s, pkt, 1, 0, (struct sockaddr *)&wakeup, sizeof(wakeup));
+    close(s);
+  }
+
+  ASSERT_INT_EQ(daemon_process(&d), 0);
+
+  ASSERT_INT_EQ(g_nl_insert_family, AF_INET);
+  ASSERT_INT_EQ(g_nl_insert_ip, 0x0a999aa8);
+  ASSERT_TRUE(g_nl_insert_return > 0);
+
+  daemon_cleanup(&d);
+  auth_replay_reset();
+}
+
 /* ---- test group ---- */
 
 TEST_GROUP(daemon)
@@ -1456,7 +1528,7 @@ TEST(test_parse_minimal),
       TEST(test_parse_port_with_ipv4), TEST(test_parse_port_with_ipv6), TEST(test_parse_too_many_ports),
       TEST(test_rule_tracking), TEST(test_rule_prune_expired),
       TEST(test_rule_prune_fresh_kept), TEST(test_rule_tracking_via_process),
-      TEST(test_daemon_process_packet_ipv6), END_TEST};
+      TEST(test_daemon_process_packet_ipv6), TEST(test_daemon_v4mapped_on_v6_socket), END_TEST};
 
 #ifdef BUILD_DAEMON_TEST_MAIN
 int main(void)

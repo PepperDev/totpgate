@@ -15,6 +15,7 @@ uint32_t g_udp_recv_src_ip;
 uint16_t g_udp_recv_src_port;
 int g_udp_recv_done;
 int g_udp_recv_family;
+int g_udp_recv_ipv4_mapped;
 
 static int g_last_fd;
 
@@ -31,6 +32,7 @@ void mock_udp_reset(void)
   g_udp_recv_src_port = 0;
   g_udp_recv_done = 0;
   g_udp_recv_family = AF_INET;
+  g_udp_recv_ipv4_mapped = 0;
   g_last_fd = -1;
 }
 
@@ -99,7 +101,13 @@ int udp_recv(int fd, unsigned char *buf, size_t len, struct sockaddr_storage *sr
         struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)src_addr;
         memset(in6, 0, sizeof(*in6));
         in6->sin6_family = AF_INET6;
-        memcpy(&in6->sin6_addr, &g_udp_recv_src_ip, 4);
+        if (g_udp_recv_ipv4_mapped) {
+          in6->sin6_addr.s6_addr[10] = 0xff;
+          in6->sin6_addr.s6_addr[11] = 0xff;
+          memcpy(&in6->sin6_addr.s6_addr[12], &g_udp_recv_src_ip, 4);
+        } else {
+          memcpy(&in6->sin6_addr, &g_udp_recv_src_ip, 4);
+        }
         in6->sin6_port = htons(g_udp_recv_src_port);
       } else {
         struct sockaddr_in *in = (struct sockaddr_in *)src_addr;

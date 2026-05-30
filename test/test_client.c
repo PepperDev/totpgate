@@ -227,6 +227,85 @@ static void test_client_run_success(void)
   close(listener);
 }
 
+static void test_parse_args_ipv6_host_port(void)
+{
+  struct client_cfg cfg;
+  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
+    "[::1]:2222", NULL
+  };
+  int ret;
+
+  optind = 0;
+  ret = parse_args(&cfg, 4, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.port, 2222);
+  ASSERT_STREQ(cfg.server, "::1");
+}
+
+static void test_parse_args_ipv6_bare_host(void)
+{
+  struct client_cfg cfg;
+  char *argv[] = { "totpgate", "--secret", "JBSWY3DPEHPK3PXP",
+    "::1", NULL
+  };
+  int ret;
+
+  optind = 0;
+  ret = parse_args(&cfg, 4, argv);
+  ASSERT_INT_EQ(ret, 0);
+  ASSERT_INT_EQ((int)cfg.port, 2222);
+  ASSERT_STREQ(cfg.server, "::1");
+}
+
+static void test_client_run_ipv6_success(void)
+{
+  struct client_cfg cfg;
+  struct sockaddr_in6 bind_addr;
+  socklen_t addrlen;
+  int listener;
+  unsigned char secret[20];
+  size_t slen;
+  enum secret_encoding enc;
+  char buf[64];
+  ssize_t n;
+  int ret;
+
+  /* set up a UDP listener on IPv6 loopback */
+  listener = socket(AF_INET6, SOCK_DGRAM, 0);
+  ASSERT_TRUE(listener >= 0);
+
+  memset(&bind_addr, 0, sizeof(bind_addr));
+  bind_addr.sin6_family = AF_INET6;
+  bind_addr.sin6_addr = in6addr_loopback;
+  bind_addr.sin6_port = 0;
+  ret = bind(listener, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
+  ASSERT_INT_EQ(ret, 0);
+
+  addrlen = sizeof(bind_addr);
+  ret = getsockname(listener, (struct sockaddr *)&bind_addr, &addrlen);
+  ASSERT_INT_EQ(ret, 0);
+
+  slen = sizeof(secret);
+  ret = secret_decode("JBSWY3DPEHPK3PXP", secret, &slen, &enc);
+  ASSERT_INT_EQ(ret, 0);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.port = ntohs(bind_addr.sin6_port);
+  cfg.secret_len = slen;
+  memcpy(cfg.secret, secret, slen);
+  snprintf(cfg.server, sizeof(cfg.server), "::1");
+
+  ret = client_run(&cfg);
+  ASSERT_INT_EQ(ret, 0);
+
+  n = recv(listener, buf, sizeof(buf), 0);
+  ASSERT_TRUE(n >= 6);
+  buf[n] = '\0';
+  ASSERT_TRUE(strchr(buf, ':') == NULL);
+
+  close(listener);
+}
+
 static void test_client_run_resolve_fail(void)
 {
   struct client_cfg cfg;
@@ -255,7 +334,10 @@ TEST(test_parse_args_minimal),
       TEST(test_parse_args_invalid_secret),
       TEST(test_parse_args_unknown_option),
       TEST(test_parse_args_server_too_long),
-      TEST(test_parse_args_hex_secret), TEST(test_client_run_success), TEST(test_client_run_resolve_fail), END_TEST};
+      TEST(test_parse_args_hex_secret),
+      TEST(test_parse_args_ipv6_host_port),
+      TEST(test_parse_args_ipv6_bare_host),
+      TEST(test_client_run_success), TEST(test_client_run_ipv6_success), TEST(test_client_run_resolve_fail), END_TEST};
 
 #ifdef BUILD_CLIENT_TEST_MAIN
 int main(void)

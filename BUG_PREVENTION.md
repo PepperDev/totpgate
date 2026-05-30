@@ -43,6 +43,20 @@
 
 - [ ] **Seccomp mode constant**: `prctl(PR_SET_SECCOMP, ...)` uses `SECCOMP_MODE_*` constants, NOT `SECCOMP_SET_MODE_*`. The set-mode constants (`SECCOMP_SET_MODE_FILTER` = 1) equal `SECCOMP_MODE_STRICT` (= 1 on this system), which enables strict mode — immediate SIGSEGV.
 
+- [ ] **IPv4-mapped IPv6**: When binding `[::]` with `IPV6_V6ONLY=0`, the kernel
+      presents IPv4 clients as `::ffff:x.x.x.x` (IPv4-mapped IPv6 addresses).
+      The daemon avoids this by binding **two separate sockets** by default:
+      `0.0.0.0:PORT` (AF_INET) and `[::]:PORT` (AF_INET6, `IPV6_V6ONLY=1`).
+      If an IPv4-mapped address is still encountered (defence in depth),
+      `handle_one_packet` / `normalize_src()` converts it to AF_INET before
+      passing to `netlink_rule_insert`.
+
+- [ ] **Client IPv6 parsing**: `parse_host_port` must handle `[ipv6]:port`
+      (bracketed), bare `ipv6` (no port), and `ipv4:port` / `host:port`
+      formats.  The presence of multiple colons (detected via `memchr`)
+      distinguishes bare IPv6 from `host:port`.  `parse_server_arg` strips
+      brackets before copying.
+
 ## Past incidents
 
 ### 2026-05-29: Ephemeral rule timeout not enforced

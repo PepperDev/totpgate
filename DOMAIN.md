@@ -22,7 +22,7 @@ The daemon `totpgated` accepts:
 
 | Argument | Default | Description |
 |---|---|---|
-| `--port` | `2222` | UDP listen port. May be given multiple times with optional IP binding (`[ip:]port`, e.g. `0.0.0.0:2222` or `[::]:2222`). |
+| `--port` | `2222` | UDP listen port. When no IP is given, binds **both** `0.0.0.0:2222` (IPv4) and `[::]:2222` (IPv6, `IPV6_V6ONLY=1`). May be given multiple times with optional IP binding (`[ip:]port`, e.g. `0.0.0.0:2222` or `[::]:2222`). |
 | `--interface` | — | Network interface (e.g. `eth0`) to bind firewall `iifname` matches to. If omitted, rules match on any interface. |
 | `--target-port` | `22` | TCP application port to protect |
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding); mutually exclusive with `--secret-file` |
@@ -41,7 +41,7 @@ The client `totpgate` accepts:
 |---|---|---|
 | `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
 | `--port` | `2222` | UDP port of the target daemon |
-| `<server>` | *(required)* | IP or hostname of the daemon; may include `:port` suffix to override `--port` |
+| `<server>` | *(required)* | IP or hostname of the daemon. May include `:port` suffix to override `--port`. IPv6 addresses must use bracket notation (`[::1]:2222`). Bare IPv6 addresses without a port are accepted (e.g. `::1`). |
 
 ---
 
@@ -148,7 +148,7 @@ Runtime record kept by the daemon for each authenticated client:
 
 | Field | Type | Description |
 |---|---|---|
-| `src_ip` | `uint32_t` | Client IPv4 (network byte order) |
+| `src_ip` | `ip_addr_t` | Client address (family + 16‑byte payload). IPv4 addresses are stored in the first 4 bytes with the rest zero‑padded. |
 | `dst_port` | `uint16_t` | Target TCP port |
 | `created` | `time_t` | When the rule was inserted |
 | `lifetime` | `uint32_t` | Rule lifetime in seconds (from `--timeout`) |
@@ -220,7 +220,9 @@ arriving on that interface.
 ```
 ON  successful authentication:
     append rule (allowed_ips): [iifname <interface>] <family> saddr <client_ip> tcp dport <target> accept
-                  // <family> is `ip` for AF_INET and `ip6` for AF_INET6
+                  // <family> is `ip` for AF_INET and `ip6` for AF_INET6.
+                  // IPv4 clients arrive on the separate AF_INET socket — no
+                  // IPv4-mapped IPv6 addresses reach the firewall layer.
                   // auto-expires after <timeout> seconds
 ```
 
@@ -283,7 +285,9 @@ START
   │      ├─ flush chain (remove stale rules from prior session)
   │      ├─ insert: ct state established,related accept
   │      └─ insert: [iifname <interface>] tcp dport <target> drop
-  ├─ 3. Bind UDP socket(s) — iterate each --port entry, resolve address, bind
+  ├─ 3. Bind UDP socket(s) — iterate each --port entry, resolve address, bind.
+  │      When no --port is given, binds two sockets: `0.0.0.0:2222` (AF_INET)
+  │      and `[::]:2222` (AF_INET6 with `IPV6_V6ONLY=1`).
   ├─ 4. Drop privileges
   │
   └─ LOOP:

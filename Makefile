@@ -165,6 +165,7 @@ lizard:
 	  $(SRC_DIR) $(TEST_DIR) \
 	  | grep -v 'src/sha1.c.*process_block' \
 	  | grep -v 'test/test_netlink.c.*sendto' \
+	  | grep -v 'test/mock_udp.c.*udp_recv' \
 	  | { lines=$$(cat); if [ -n "$$lines" ]; then echo "$$lines"; exit 1; fi; }
 	@lizard -Eoutside $(SRC_DIR)/*.c 2>/dev/null | awk '\
 	  /^NLOC[[:space:]]+Avg\.NLOC/ { in_summary = 1; next } \

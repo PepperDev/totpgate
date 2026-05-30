@@ -299,24 +299,47 @@ static int daemon_handle_signal(struct daemon *d)
   return 1;
 }
 
+static uint16_t normalize_src(const struct sockaddr_storage *src, struct sockaddr_storage *buf,
+                              ip_addr_t *ip, const struct sockaddr_storage **rule)
+{
+  if (src->ss_family == AF_INET) {
+    *rule = src;
+    return ntohs(((const struct sockaddr_in *)src)->sin_port);
+  }
+  const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)src;
+
+  if (IN6_IS_ADDR_V4MAPPED(&in6->sin6_addr)) {
+    struct sockaddr_in *in4 = (struct sockaddr_in *)buf;
+
+    memset(in4, 0, sizeof(*in4));
+    in4->sin_family = AF_INET;
+    in4->sin_port = in6->sin6_port;
+    memcpy(&in4->sin_addr, in6->sin6_addr.s6_addr + 12, 4);
+    *rule = (const struct sockaddr_storage *)buf;
+
+    ip->family = AF_INET;
+    memmove(ip->addr, in6->sin6_addr.s6_addr + 12, 4);
+    memset(ip->addr + 4, 0, 12);
+  } else {
+    *rule = src;
+  }
+  return ntohs(in6->sin6_port);
+}
+
 static void handle_one_packet(struct daemon *d, const unsigned char *buf, int len,
                               const struct sockaddr_storage *src_addr)
 {
   ip_addr_t src_ip;
-  uint16_t src_port = 0;
+  uint16_t src_port;
   uint32_t token;
   uint64_t rule_handle;
   char logbuf[128];
   time_t now;
+  struct sockaddr_storage addrbuf;
+  const struct sockaddr_storage *rule_addr;
 
   ip_from_sockaddr(src_addr, &src_ip);
-  if (src_addr->ss_family == AF_INET) {
-    const struct sockaddr_in *in = (const struct sockaddr_in *)src_addr;
-    src_port = ntohs(in->sin_port);
-  } else {
-    const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)src_addr;
-    src_port = ntohs(in6->sin6_port);
-  }
+  src_port = normalize_src(src_addr, &addrbuf, &src_ip, &rule_addr);
 
   now = time(NULL);
 
@@ -348,13 +371,13 @@ static void handle_one_packet(struct daemon *d, const unsigned char *buf, int le
 
   rate_limit_success(&src_ip);
 
-  rule_handle = netlink_rule_insert(src_addr, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
+  rule_handle = netlink_rule_insert(rule_addr, d->cfg->target_port, d->cfg->iface[0] ? d->cfg->iface : NULL);
   if (rule_handle == 0) {
     log_msg(d->cfg, LOG_ERR, "netlink_rule_insert failed");
     return;
   }
 
-  rule_track(d, rule_handle, src_addr->ss_family, now + (time_t) d->cfg->timeout);
+  rule_track(d, rule_handle, rule_addr->ss_family, now + (time_t) d->cfg->timeout);
 
   {
     char ip_str[INET6_ADDRSTRLEN];

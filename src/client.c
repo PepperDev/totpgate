@@ -33,21 +33,34 @@ static void print_usage(const char *prog)
 
 static int parse_host_port(const char *str, uint16_t *port, size_t *host_len)
 {
-  const char *colon;
+  const char *port_start;
 
-  colon = strrchr(str, ':');
-  if (colon == NULL)
-    return 0;
+  if (str[0] == '[') {
+    const char *close = strchr(str, ']');
+    if (!close)
+      return 0;
+    if (close[1] != ':')
+      return 0;
+    port_start = close + 2;
+    *host_len = (size_t)(close - str - 1);
+  } else {
+    const char *colon = strrchr(str, ':');
+    if (colon == NULL)
+      return 0;
+    /* If there are multiple colons, it's a bare IPv6 address (no port). */
+    if (memchr(str, ':', (size_t)(colon - str)) != NULL)
+      return 0;
+    port_start = colon + 1;
+    *host_len = (size_t)(colon - str);
+  }
 
-  /* Check if the part after the colon looks like a port number */
   {
     char *end;
     long val;
 
-    val = strtol(colon + 1, &end, 10);
+    val = strtol(port_start, &end, 10);
     if (*end == '\0' && val >= 1 && val <= 65535) {
       *port = (uint16_t) val;
-      *host_len = (size_t)(colon - str);
       return 1;
     }
   }
@@ -81,6 +94,7 @@ static int handle_secret_opt(struct client_cfg *cfg, const char *optarg)
 
 static int parse_server_arg(struct client_cfg *cfg, const char *src)
 {
+  const char *host_start = src;
   size_t slen = strlen(src);
 
   {
@@ -89,6 +103,9 @@ static int parse_server_arg(struct client_cfg *cfg, const char *src)
 
     if (parse_host_port(src, &p, &host_len)) {
       cfg->port = p;
+      /* Bracketed [IPv6]:port strips the brackets — skip the '[' */
+      if (src[0] == '[')
+        host_start = src + 1;
       slen = host_len;
     }
   }
@@ -97,7 +114,7 @@ static int parse_server_arg(struct client_cfg *cfg, const char *src)
     fprintf(stderr, "error: server name too long\n");
     return -1;
   }
-  memcpy(cfg->server, src, slen);
+  memcpy(cfg->server, host_start, slen);
   cfg->server[slen] = '\0';
   return 0;
 }
@@ -164,16 +181,19 @@ int client_run(struct client_cfg *cfg)
   struct addrinfo *ai;
   int ret;
   int fd;
-  int err;
-  struct sockaddr_in sa;
-  const char *host;
   uint16_t port;
+  char host[INET6_ADDRSTRLEN];
+  union {
+    struct sockaddr_storage ss;
+    struct sockaddr_in sin;
+    struct sockaddr_in6 sin6;
+  } sa;
 
   token = totp_generate(cfg->secret, cfg->secret_len, (uint64_t) (time(NULL) / TOTP_STEP), TOTP_DIGITS);
   pkt_len = (size_t)snprintf(pkt, sizeof(pkt), "%06u", (unsigned)token);
 
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
+  hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_DGRAM;
 
   ret = getaddrinfo(cfg->server, NULL, &hints, &ai);
@@ -187,23 +207,32 @@ int client_run(struct client_cfg *cfg)
     return -1;
   }
 
-  host = inet_ntoa(((const struct sockaddr_in *)ai->ai_addr)->sin_addr);
   port = cfg->port;
+  memset(&sa, 0, sizeof(sa));
 
-  fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (ai->ai_family == AF_INET6) {
+    const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)ai->ai_addr;
+    sa.sin6.sin6_family = AF_INET6;
+    sa.sin6.sin6_port = htons(port);
+    sa.sin6.sin6_addr = s6->sin6_addr;
+    inet_ntop(AF_INET6, &s6->sin6_addr, host, sizeof(host));
+  } else {
+    const struct sockaddr_in *s4 = (const struct sockaddr_in *)ai->ai_addr;
+    sa.sin.sin_family = AF_INET;
+    sa.sin.sin_port = htons(port);
+    sa.sin.sin_addr = s4->sin_addr;
+    inet_ntop(AF_INET, &s4->sin_addr, host, sizeof(host));
+  }
+
+  fd = socket(ai->ai_family, SOCK_DGRAM, 0);
   if (fd < 0) {
     fprintf(stderr, "error: socket: %s\n", strerror(errno));
     freeaddrinfo(ai);
     return -1;
   }
 
-  memset(&sa, 0, sizeof(sa));
-  sa.sin_family = AF_INET;
-  sa.sin_port = htons(port);
-  sa.sin_addr = ((const struct sockaddr_in *)ai->ai_addr)->sin_addr;
-
-  err = sendto(fd, pkt, pkt_len, 0, (const struct sockaddr *)&sa, sizeof(sa));
-  if (err < 0) {
+  ret = sendto(fd, pkt, pkt_len, 0, (const struct sockaddr *)&sa, ai->ai_addrlen);
+  if (ret < 0) {
     fprintf(stderr, "error: sendto %s:%u: %s\n", host, (unsigned)port, strerror(errno));
     close(fd);
     freeaddrinfo(ai);
