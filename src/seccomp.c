@@ -84,11 +84,11 @@ static int apply_filter(void)
 #ifdef SYS_clock_gettime64
     ALLOW(SYS_clock_gettime64),
 #endif
-#ifdef SYS_clock_gettime32
-    ALLOW(SYS_clock_gettime32),
-#endif
 #ifdef SYS_poll
     ALLOW(SYS_poll),
+#endif
+#ifdef SYS_ppoll
+    ALLOW(SYS_ppoll),
 #endif
 #ifdef SYS_epoll_wait
     ALLOW(SYS_epoll_wait),
