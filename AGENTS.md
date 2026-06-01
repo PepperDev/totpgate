@@ -1,194 +1,99 @@
 # AGENTS — Development Guidelines
 
-This file governs how AI agents (including future sessions) interact with the
-totpgate codebase.  **Read this first** before making any changes.
+This file governs how AI agents interact with the totpgate codebase.
+**Read this first** before making any changes.
 
 ---
 
-## 1.  Reference documents
+## Design Ethos
 
-| File | Purpose |
-|---|---|
-| `DOMAIN.md` | Business rules, entities, glossary |
-| `TODO.md` | Task list with section-completion rules |
-| `BUG_PREVENTION.md` | Checklist of recurring bugs to guard against |
-| `Makefile` | Single entry point for build / test / lint |
+Minimalistic, compact, secure.  Source code should be readable and maintainable
+by a single human.
 
----
-
-## 2.  Build invariants
-
-- **Compiler**: `musl-gcc` preferred (falls back to `cc`; any C99 compiler works).
-  Static linking via `-static -flto` — no glibc dependency at runtime.
-- **C standard**: `-std=c99 -pedantic -pedantic-errors`.
-- **Flags**: `-O3 -Wall -Wextra -flto`.
-- **Link**: `-static -flto`.
-- **Dependency tracking**: `-MMD -MP` — `.d` files are generated and included.
-- **Binary destination**: `bin/`.
-- **Style**: `indent -linux -120 -i2 -nut` — run `make style` to auto-format.
-- **Static analysis**: `cppcheck` — run `make cppcheck` before committing.
-- **Code metrics**: `lizard` — run `make lizard` before committing. See rules in §9.
-- **Braces**: always wrap blocks with braces, even single-line `if`/`for`/`while`/`do`.
-- **No third-party libraries**: implement everything from scratch (SHA1, HMAC,
-  base32, base64, hex decode, netlink helpers, test framework, …).
-- **No external binaries**: manipulate firewall rules via netlink sockets
-  directly — never shell out to `iptables`, `nft`, or `ip`.
-
----
-
-## 3.  Coding conventions
-
-### 3.1  General
-
-- Write for **human comprehension**.  Prefer clear names over clever tricks.
-- **Avoid code duplication**.  Extract shared logic into static helpers.
-- **Lightweight**: save resources, worship performance, neat memory management.
-- Apply **SOLID** principles — especially Single Responsibility and
-  Dependency Inversion.
-- Functions should be **agnostic**: receive arguments, process, return results.
-  Avoid global / file-scope mutable state as much as possible.
-- Return `int` error codes (0 = success, negative = errno-style).
-- Assert pre-conditions with `assert()` from `<assert.h>`.
-
-### 3.2  Naming
-
-| Element | Convention | Example |
-|---|---|---|
-| Functions | `snake_case` | `totp_validate` |
-| Globals | `g_` prefix | `g_config` |
-| Macros / enums | `UPPER_SNAKE` | `TOTP_DIGITS` |
-| Types | `snake_case_t` | `totp_ctx_t` |
-| File-local | `static` | |
-
-### 3.3  Error handling
-
-- Check every syscall / function return.
-- On failure, set `errno` and return negative.
-- Top-level `main()` prints `strerror(errno)` before exiting.
-
-### 3.4  Memory
-
-- Prefer stack allocation.
-- When heap is required, `calloc` + paired `free`, no `malloc`/`realloc` without
-  zeroing.
-- No variable-length arrays (VLAs are problematic in C99 in practice).
-
----
-
-## 4.  Testing
-
-### 4.1  Framework
-
-There is **no third-party test library**.  The test runner lives in
-`test/test_runner.c` and provides:
-
-- `TEST_GROUP(name)` / `TEST(name)` / `END_TEST`
-- `ASSERT_INT_EQ`, `ASSERT_PTR_EQ`, `ASSERT_STREQ`, `ASSERT_TRUE`,
-  `ASSERT_FALSE`
-- `RUN_TEST(group, name)`
-- `RUN_GROUP(group)` — runs all tests in a group
-
-### 4.2  Mocks
-
-Mocks are **stubs** — hand-written functions in `test/mock_*.c` that replace
-real implementations at link time.  The Makefile compiles either the real
-module or the mock variant depending on the target.
-
-### 4.3  Coverage gate
-
-Every TODO section requires:
-
-1. **Zero compiler warnings** (`-Wall -Wextra -pedantic-errors`).
-2. **≥ 80 % line coverage** measured by `gcov`.
-
-Run: `make coverage`
-
----
-
-## 5.  Performance-first design
+## Performance-First Design
 
 When multiple technical solutions are possible, always prefer the one that
 performs better under heavy workload.  Key principles:
 
-- **I/O multiplexing**: use `epoll` exclusively — never `poll`, `select`, or `ppoll`.
+- **I/O multiplexing**: use `epoll` exclusively — never `poll`, `select`, or
+  `ppoll`.
 - **Non-blocking**: every socket fd must be `O_NONBLOCK`.  Never use blocking
   I/O in the daemon's main loop.
 - **Batch processing**: `epoll_wait` with `d->maxevents` (derived from
   `RLIMIT_NOFILE`) and process all ready fds per call.
-- **Edge-triggered for data**: use `EPOLLET` on data sockets; loop
-  read/write until `EAGAIN` to avoid missing events.
+- **Edge-triggered for data**: use `EPOLLET` on data sockets; loop read/write
+  until `EAGAIN` to avoid missing events.
 - **Level-triggered for control**: signal fds use level-triggered (default)
   since each signal event must be consumed exactly once per wake-up.
 - **Memory**: fixed-size pools aren't just for embedded — they prevent
   allocation jitter under load.  Prefer a pre-allocated session pool with an
   SLAB-style free list.
-- **Dual-stack listening**: by default the daemon binds **two** UDP sockets —
+- **Dual-stack listening**: by default the daemon binds two UDP sockets —
   `0.0.0.0:2222` (AF_INET) and `[::]:2222` (AF_INET6, `IPV6_V6ONLY=1`).
   IPv4 clients arrive on the AF_INET socket with a native IPv4 address,
   avoiding IPv4-mapped IPv6 (`::ffff:x.x.x.x`) that would otherwise land on
-  the `ip6` nftables family.  When a single socket is explicitly configured
-  (e.g. `--port [::]:2222`), `IPV6_V6ONLY=1` prevents accidental IPv4
-  overlap.
+  the `ip6` nftables family.
+- **Smart dynamic allocation**: prefer stack memory, but if static allocation
+  would limit performance, latency, throughput, or fail under stress, use
+  smart dynamic allocation with bucket grows and shrinks.  Recommended grow:
+  add `max(cap, 64)` up to a ceiling (if any).  Recommended shrink: halve when
+  utilisation drops below 25 % down to a floor (usually initial value).
+- **Exponential backoff**: use smart retry mechanisms with exponential backoff.
 
----
+See [DOMAIN.md](./DOMAIN.md#retry-landscape) for the full retry landscape and
+memory management strategies.
 
-## 6.  Task lifecycle (TODO.md)
+## Domain Reference
 
-- Each **section** groups related tasks.
-- A task is **done** when:
-  - Code compiles with zero warnings.
-  - Line coverage ≥ 80 %.
-  - `make test` passes.
-  - `make style` has been run.
-  - `make cppcheck` passes.
-  - `make lizard` passes (see §9 for thresholds).
-  - `BUG_PREVENTION.md` has been reviewed for applicable items.
-- When **all** tasks in a section are done, **delete the entire section** from
-  `TODO.md`.
-- **Before every commit**: run `make style` and review `TODO.md` to ensure
-  completed sections have been removed and remaining items are accurate.
+For business rules, entities, CLI arguments, flows, retry landscape, memory
+management strategies, threading architecture, glossary, and code quality
+exceptions, refer to [DOMAIN.md](./DOMAIN.md).
 
----
+## Contributing
 
-## 7.  Bug prevention
+Agents must follow the same Definition of Done, TODO housekeeping, code
+conventions, bug prevention, quality gate, and testing requirements as human
+contributors.  See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-Whenever a bug is fixed, evaluate its **recurrence likelihood**:
+All items of the Definition of Done are mandatory before every commit, with no
+exceptions.  This includes the full quality gate (cppcheck, lizard,
+gcov ≥ 80 %), TODO housekeeping, and all other checks listed in
+CONTRIBUTING.md.  Do not commit partial work — a commit that fails any quality
+gate item is not permitted.
 
-| Likelihood | Action |
-|---|---|
-| Low | No action |
-| Medium | Add a note to `BUG_PREVENTION.md` |
-| High | Add a checklist item to `BUG_PREVENTION.md` AND add a matching test case |
+## Constraints
 
-Also consult `BUG_PREVENTION.md` as part of the **done criteria** for every
-new task.
-
----
-
-## 8.  Privilege model
-
-- Agents (build, test, lint) run as an **unprivileged user** — no `sudo`.
-- If a desired system tool is missing (e.g., `musl-gcc`, `indent`, `cppcheck`, `gcov`),
-  ask the user to install it rather than failing silently.
-  `lizard` is installed via pip (`sudo pip install --break-system-packages lizard`).
+- Run as an **unprivileged user** — no `sudo`.
+- When a required system tool is missing (e.g. `musl-gcc`, `indent`, `cppcheck`,
+  `gcov`), ask the user to install it rather than failing silently.  `lizard`
+  is installed via pip (`sudo pip install --break-system-packages lizard`).
 - The daemon itself drops privileges early after binding the UDP socket.
 
----
+All items of the Definition of Done are mandatory before every commit, along
+with all other checks listed in CONTRIBUTING.md.
 
-## 9.  Code quality thresholds (lizard)
+## Loop Mode
 
-`make lizard` enforces the following hard limits.  Values in parentheses are
-recommended targets; exceeding the hard limit causes the build to fail.
+Agents enter loop mode on user request only.
 
-| Metric | Hard limit | Recommended | Notes |
-|---|---|---|---|
-| LOC per file | 600 | 300 | Non-comment, non-blank lines of code; applies to `src/` only |
-| LOC per function | 80 | 40 | Non-comment, non-blank lines per function body; applies to `src/` only |
-| Cyclomatic complexity | 10 | 6 | McCabe's cyclomatic complexity per function |
-| Tokens per function | 500 | 250 | Proxy for statement count via `-T token_count=` |
-| Nested control structures | 3 | — | `-ENS` extension in lizard |
-| Function parameter count | 5 | — | Number of formal parameters |
-| Cohesion & coupling | 1 public abstraction / file | — | Code review item: one public abstraction per file, low coupling, high cohesion |
+During context compaction, make sure to keep in the context if agent is
+currently on loop mode or not.
 
-Exceptions are listed in `DOMAIN.md §6` and must be
-accompanied by a justification explaining why the exception is acceptable.
+When entering loop mode follow the steps:
+
+1. Check for work-in-progress changes in the worktree and try to match the
+   task they belong to; resume it.
+2. If none, tackle the next task that makes sense.
+3. File and function names need not strictly match those in TODO.md — agents
+   are free to reorganize them.
+4. Add multi level source directories (only `main` at `src/`, remaining grouped
+   in meaningful subdirectories, e.g. `src/module/code.c`), moving files to
+   group related responsibilities (SOLID).
+5. Each iteration, try to reduce or avoid lizard exceptions by reorganising or
+   refactoring the code.
+6. Apply the Definition of Done, including TODO housekeeping.
+7. Commit.
+8. Loop back until the user interrupts.  For relevant missing critical technical
+   details or blockers (e.g. a required system tool or permission), query the
+   user.  Do not query the user to decide the next task — pick the most relevant
+   one and proceed.

@@ -16,17 +16,17 @@ IP to open a TCP connection to a protected port for 30 seconds.
 
 ---
 
-## 1.1  CLI Interface
+## 2.  CLI Arguments
 
-The daemon `totpgated` accepts:
+### 2.1  Daemon (`totpgated`)
 
 | Argument | Default | Description |
 |---|---|---|
 | `--port` | `2222` | UDP listen port. When no IP is given, binds **both** `0.0.0.0:2222` (IPv4) and `[::]:2222` (IPv6, `IPV6_V6ONLY=1`). May be given multiple times with optional IP binding (`[ip:]port`, e.g. `0.0.0.0:2222` or `[::]:2222`). |
 | `--interface` | — | Network interface (e.g. `eth0`) to bind firewall `iifname` matches to. If omitted, rules match on any interface. |
 | `--target-port` | `22` | TCP application port to protect |
-| `--secret` | *(required)* | Shared secret (see §2.1 for encoding); mutually exclusive with `--secret-file` |
-| `--secret-file` | — | Path to file containing the shared secret (see §2.1 for encoding); mutually exclusive with `--secret` |
+| `--secret` | *(required)* | Shared secret (see §3.1 for encoding); mutually exclusive with `--secret-file` |
+| `--secret-file` | — | Path to file containing the shared secret (see §3.1 for encoding); mutually exclusive with `--secret` |
 | `--timeout` | `30` | Ephemeral rule lifetime in seconds |
 | `--min-block` | `300` | Min rate-limit block duration in seconds |
 | `--max-block` | `86400` | Max rate-limit block duration in seconds |
@@ -35,19 +35,19 @@ The daemon `totpgated` accepts:
 | `--group` | `nogroup` | Unprivileged group to run as after binding socket |
 | `--foreground` | off | Log to stderr instead of syslog |
 
-The client `totpgate` accepts:
+### 2.2  Client (`totpgate`)
 
 | Argument | Default | Description |
 |---|---|---|
-| `--secret` | *(required)* | Shared secret (see §2.1 for encoding) |
+| `--secret` | *(required)* | Shared secret (see §3.1 for encoding) |
 | `--port` | `2222` | UDP port of the target daemon |
 | `<server>` | *(required)* | IP or hostname of the daemon. May include `:port` suffix to override `--port`. IPv6 addresses must use bracket notation (`[::1]:2222`). Bare IPv6 addresses without a port are accepted (e.g. `::1`). |
 
 ---
 
-## 2.  Entities
+## 3.  Entities
 
-### 2.1  `shared_secret`
+### 3.1  `shared_secret`
 
 - Opaque byte array (≥ 16 bytes, recommended 32).
 - Known to both client and daemon _a priori_.
@@ -75,14 +75,14 @@ Decoding rules:
 - Base64: reject characters outside RFC 4648 standard alphabet; reject invalid
   padding; handle embedded whitespace.
 
-### 2.2  `totp_token`
+### 3.2  `totp_token`
 
 - 6 decimal digits (hardcoded in both client and daemon).
 - Computed as `Truncate(HMAC-SHA1(secret, time_counter)) mod 10^6`.
 - `time_counter = floor(UnixTime / time_step)`.
 - Time step: 30 seconds (hardcoded).
 
-### 2.3  `auth_window`
+### 3.3  `auth_window`
 
 | Parameter | Value | Description |
 |---|---|---|
@@ -94,7 +94,7 @@ The effective window size is `1 + drift_ahead + drift_behind` windows.
 A token is valid if it matches **any** window in the range.  None of these
 parameters are user-configurable.
 
-### 2.4  `auth_packet`
+### 3.4  `auth_packet`
 
 The UDP datagram sent by the client.  Wire format:
 
@@ -108,7 +108,7 @@ The packet contains only the token (e.g. `482639`).  The daemon rejects any
 packet with trailing data.  The target port and rule lifetime are controlled
 exclusively by the daemon's `--target-port` and `--timeout` options.
 
-### 2.5  `firewall_rule`
+### 3.5  `firewall_rule`
 
 Netfilter rules inserted via netlink into the **nftables** `ip` and `ip6` families.
 
@@ -143,7 +143,7 @@ The ephemeral rule omits `ct state new` because the permanent
 `established,related accept` rule is evaluated first in `input` and
 catches non-new packets before the jump.
 
-### 2.6  `auth_session`
+### 3.6  `auth_session`
 
 Runtime record kept by the daemon for each authenticated client:
 
@@ -161,7 +161,7 @@ informational and used for logging / status.
 
 ---
 
-## 3.  Business rules
+## 4.  Business Rules
 
 ### BR-1  Authentication
 
@@ -273,7 +273,7 @@ ON  auth success from <ip>:
 
 ---
 
-## 4.  Lifecycle
+## 5.  Flow / Lifecycle
 
 ```
 START
@@ -292,7 +292,7 @@ START
   ├─ 4. Drop privileges
   │
   └─ LOOP:
-       ├─ 5. Wait for UDP datagram (poll with timeout)
+       ├─ 5. Wait for UDP datagram (epoll with timeout)
        ├─ 6. Parse auth_packet
        ├─ 7. Validate TOTP
        ├─ 8. Check anti-replay seq counter
@@ -303,7 +303,51 @@ START
 
 ---
 
-## 5.  Glossary
+## 6.  Retry Landscape
+
+| Scenario | Mechanism | Max trials | Backoff | Notes |
+|---|---|---|---|---|
+| Auth failure (per-IP) | Rate-limit window + exponential block | Unlimited (window resets) | 2× per cycle, min_block → max_block | See BR-8 |
+| UDP socket read | epoll_wait returns ready; non-blocking recvfrom | N/A (event-driven) | None | EAGAIN terminates burst |
+
+No network-level retry is implemented.  The client sends one UDP datagram and
+exits.  Retry is the caller's responsibility.
+
+---
+
+## 7.  Dynamic Arrays (Grow / Shrink)
+
+No dynamic arrays are used.  All data structures use fixed-size pre-allocated
+arrays:
+
+| Structure | Type | Size | Notes |
+|---|---|---|---|
+| Session table | Fixed array | `MAX_SESSIONS` (128) | SLAB-style free list |
+| Rate-limit table | Fixed array | `MAX_RATELIMIT` (1024) | Linear-probed open addressing |
+| epoll events | Fixed array | RLIMIT_NOFILE | Allocated once at startup |
+
+---
+
+## 8.  Hash Maps (Bucket Grow / Shrink)
+
+No hash maps with dynamic bucket growth are used.  The rate-limit table uses a
+fixed-size open-addressing scheme with linear probing and a probe budget.
+There is no resizing — entries are recycled on expiry.
+
+---
+
+## 9.  Thread / Worker / Parallelism Landscape
+
+The daemon is **single-threaded**.  All I/O is multiplexed via epoll
+(edge-triggered).  There are no worker threads, no mutexes, and no shared
+mutable state between threads.
+
+Signal handling uses a self-pipe trick: the signal handler writes a byte to a
+pipe whose read end is registered in the epoll set.
+
+---
+
+## 10.  Glossary
 
 | Term | Definition |
 |---|---|
@@ -314,18 +358,3 @@ START
 | nftables | Modern Linux packet classification framework (replacement for iptables) |
 | Time step | Duration of each TOTP window (typically 30 s) |
 | Drift | Number of windows before/after the current one that are still accepted |
-
----
-
-## 6.  Code quality exceptions (whitelist)
-
-The following functions are permitted to exceed lizard thresholds for
-legitimate reasons:
-
-| Function | File | Threshold exceeded | Justification |
-|---|---|---|---|
-| `process_block` | `src/sha1.c` | Nesting depth (4 > 3) | SHA-1 compression loop with 4-round if/else chain — algorithmic, not accidental complexity |
-| `rule_prune` | `src/main.c` | Nesting depth (4 > 3), ND=0 | Flush+recreate loop iterates rules twice — flat structure intentional for readability; NS=4 from two pass loops with expiry checks |
-
-New exceptions must be reviewed and justified here before adding to
-`make lizard`'s suppression logic.

@@ -118,9 +118,12 @@ See the man pages (`totpgated.1`, `totpgate.1`) or `--help` for full options.
 
 ```
 ├── AGENTS.md        — agent / AI guidelines
-├── DOMAIN.md        — business rules & entities
+├── CONTRIBUTING.md  — coding conventions, quality gate, definition of done
+├── DOMAIN.md        — business rules, entities, lifecycle
+├── QA.md            — quality assurance, bug prevention, exceptions
+├── SECURITY.md      — security policy
+├── CODE_OF_CONDUCT.md
 ├── TODO.md          — tracked task list
-├── BUG_PREVENTION.md— recurring-bug checklist
 ├── Makefile
 ├── src/             — source code
 │   ├── main.c       — daemon entrypoint, event loop, CLI parsing

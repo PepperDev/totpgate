@@ -1,7 +1,2 @@
 /bin/
 /obj/
-*.o
-*.d
-*.gcda
-*.gcno
-*.gcov
